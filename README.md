@@ -51,20 +51,21 @@ Hardware awareness auto-detects GPU/VRAM/RAM and adjusts parallelism, model dept
 ## Quick start
 
 ```bash
-# 1. Install dependencies
-pip install kagglehub pandas numpy scikit-learn lightgbm xgboost catboost torch psutil
+# 1. Set up project environment
+uv init --python 3.12
+uv add kagglehub pandas numpy scikit-learn lightgbm xgboost catboost psutil
 
 # 2. Set up Kaggle API token
 # Go to kaggle.com/account → Create API Token → save as ~/.kaggle/kaggle.json
 
 # 3. Run
-python main.py --competition "tabular-playground-series-jan-2021" --iterations 50
+uv run main.py --competition "tabular-playground-series-jan-2021" --iterations 50
 ```
 
 ## Usage
 
 ```bash
-python main.py \
+uv run main.py \
   --competition "<competition-name>" \
   --iterations 50 \
   --submission-interval 5 \
@@ -83,6 +84,8 @@ python main.py \
 
 ```
 kaggle-research/
+├── pyproject.toml         → uv project config with all dependencies
+├── .python-version        → Python 3.12
 ├── SKILL.md              → Agent entry point (triggers, workflow, decision tree)
 ├── main.py               → Orchestrator: the autoresearch loop
 ├── hardware.py           → GPU / RAM / core detection
@@ -114,7 +117,7 @@ If you're using an AI coding agent (Claude Code, Codex), load the skill:
 For the final push (last 3 days of a competition):
 
 ```bash
-python main.py --competition "<name>" --iterations 50 --final-days 3
+uv run main.py --competition "<name>" --iterations 50 --final-days 3
 ```
 
 Then to generate a submission on Kaggle's own GPUs:
