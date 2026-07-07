@@ -32,5 +32,4 @@ def detect_hardware():
         "ram_gb": ram,
         "cores": cores,
         "on_kaggle": on_kaggle,
-        "parallel_workers": max(1, cores // 2),
     }

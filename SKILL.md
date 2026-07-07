@@ -1,6 +1,8 @@
 # kaggle-research
 
-Autonomous Kaggle/Zindi competition agent. Uses the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit.
+Autonomous Kaggle/Zindi competition agent. Designed to run inside AI coding agent harnesses (opencode, Claude Code, pi.dev, Codex).
+
+Uses the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit.
 
 ## When the user says
 

@@ -58,7 +58,7 @@ It checks:
 - **RAM** — how much system memory is available?
 - **CPU cores** — how many parallel workers can it safely spawn?
 
-This determines how many trees it builds, whether to enable GPU training (`task_type="GPU"` in CatBoost), and how many parallel hypothesis workers to run.
+This determines how many trees it builds and whether to enable GPU training (`task_type="GPU"` in CatBoost).
 
 ### Step 3: Detect the task type
 
