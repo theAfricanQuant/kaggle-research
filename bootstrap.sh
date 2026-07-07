@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "Usage: ./bootstrap.sh <competition-folder-name>"
+  echo "Usage: ./bootstrap.sh <competition-folder-name> [target-directory]"
   echo ""
   echo "Creates a new competition project folder with all kaggle-research files."
   echo ""
@@ -10,12 +10,14 @@ if [ $# -lt 1 ]; then
   echo "  ./bootstrap.sh house-prices-competition"
   echo "  ./bootstrap.sh zindi-food-prices"
   echo "  ./bootstrap.sh playground-jan-2021"
+  echo "  ./bootstrap.sh house-prices ~/Documents/07_DataScience/competition"
   exit 1
 fi
 
 TARGET="$1"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEST="$REPO_DIR/$TARGET"
+PARENT="${2:-$REPO_DIR}"
+DEST="$PARENT/$TARGET"
 
 if [ -d "$DEST" ]; then
   echo "Error: folder '$TARGET' already exists at $DEST"
@@ -48,4 +50,4 @@ echo "  cd $TARGET"
 echo "  uv sync"
 echo "  uv run main.py --competition \"<competition-slug>\" --iterations 50"
 echo ""
-echo "(Run from anywhere: $REPO_DIR/bootstrap.sh <name>)"
+echo "(Run from anywhere: $REPO_DIR/bootstrap.sh <name> [target-dir])"
