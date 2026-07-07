@@ -15,18 +15,19 @@ fi
 
 TARGET="$1"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEST="$REPO_DIR/$TARGET"
 
-if [ -d "$TARGET" ]; then
-  echo "Error: folder '$TARGET' already exists"
+if [ -d "$DEST" ]; then
+  echo "Error: folder '$TARGET' already exists at $DEST"
   exit 1
 fi
 
-echo "==> Creating $TARGET from kaggle-research template..."
+echo "==> Creating $DEST from kaggle-research template..."
 
-mkdir -p "$TARGET"
-rsync -a --exclude='.git' --exclude='.gitignore' --exclude='bootstrap.sh' "$REPO_DIR/" "$TARGET/"
+mkdir -p "$DEST"
+rsync -a --exclude='.git' --exclude='.gitignore' --exclude='bootstrap.sh' "$REPO_DIR/" "$DEST/"
 
-cd "$TARGET"
+cd "$DEST"
 
 # Update pyproject.toml name to match folder
 sed -i "s/name = \"kaggle-research\"/name = \"$TARGET\"/" pyproject.toml
@@ -47,3 +48,4 @@ echo "  cd $TARGET"
 echo "  uv sync"
 echo "  uv run main.py --competition \"<competition-slug>\" --iterations 50"
 echo ""
+echo "(Run from anywhere: $REPO_DIR/bootstrap.sh <name>)"
