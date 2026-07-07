@@ -72,15 +72,35 @@ The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family
 
 ## Setup
 
+**Step 1 — Clone the template (one-time)**
+
 ```bash
-# Bootstrap a named project folder for your competition
-./bootstrap.sh my-competition
-cd my-competition
-uv sync
-# API token: https://kaggle.com/account → Create API Token → ~/.kaggle/kaggle.json
+git clone https://github.com/theAfricanQuant/kaggle-research.git
+cd kaggle-research
 ```
 
-## Run
+**Step 2 — Bootstrap a named project folder**
+
+```bash
+./bootstrap.sh my-competition
+cd my-competition
+```
+
+**Step 3 — Install dependencies**
+
+```bash
+uv sync
+```
+
+**Step 4 — Set up the Kaggle API token (one-time)**
+
+```bash
+mkdir -p ~/.kaggle
+cp ~/Downloads/kaggle.json ~/.kaggle/
+chmod 600 ~/.kaggle/kaggle.json
+```
+
+**Step 5 — Run**
 
 ```bash
 uv run main.py --competition "my-competition-slug" --iterations 50

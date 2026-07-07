@@ -141,50 +141,76 @@ Works on Linux, macOS, and Windows (WSL2). Works on both CPU-only machines and G
 
 ## Quick start: your first competition
 
-Let's run the [Tabular Playground Series](https://kaggle.com/competitions/tabular-playground-series-jan-2021) — a beginner-friendly synthetic dataset:
+Let's run the [Tabular Playground Series](https://kaggle.com/competitions/tabular-playground-series-jan-2021):
+
+**Step 1 — Clone the template (one-time)**
 
 ```bash
-# 1. Clone the template (one-time)
 git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research
+```
 
-# 2. Bootstrap a named project folder for this competition
+**Step 2 — Create a named project folder for this competition**
+
+```bash
 ./bootstrap.sh playground-jan-2021
-
-# 3. Enter it, install deps
 cd playground-jan-2021
-uv sync
+```
 
-# 4. Set up your Kaggle API token (one-time)
+**Step 3 — Install dependencies**
+
+```bash
+uv sync
+```
+
+**Step 4 — Set up your Kaggle API token (one-time)**
+
+```bash
 mkdir -p ~/.kaggle
 cp ~/Downloads/kaggle.json ~/.kaggle/
 chmod 600 ~/.kaggle/kaggle.json
+```
 
-# 5. Run
+Go to [kaggle.com/account](https://kaggle.com/account) → Create API Token to download `kaggle.json`.
+
+**Step 5 — Run the agent**
+
+```bash
 uv run main.py --competition "tabular-playground-series-jan-2021" --iterations 50
 ```
 
+**Step 1 — Clone the template (one-time)**
+
 ```bash
-# 1. Clone the template once
 git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research
+```
 
-# 2. Create a new project folder for your competition
-./bootstrap.sh household-electricity-consumption
+**Step 2 — Bootstrap a new project folder**
 
-# 3. Enter it and install dependencies
-cd household-electricity-consumption
+```bash
+./bootstrap.sh my-competition
+cd my-competition
+```
+
+**Step 3 — Install dependencies**
+
+```bash
 uv sync
+```
 
-# 4. Set up your Kaggle API token (one-time)
-#    Go to kaggle.com/account → click "Create API Token"
-#    This downloads a kaggle.json file
+**Step 4 — Set up the Kaggle API token (one-time)**
+
+```bash
 mkdir -p ~/.kaggle
 cp ~/Downloads/kaggle.json ~/.kaggle/
 chmod 600 ~/.kaggle/kaggle.json
+```
 
-# 5. Run the agent
-uv run main.py --competition "household-electricity-consumption" --iterations 50
+**Step 5 — Run**
+
+```bash
+uv run main.py --competition "<competition-slug>" --iterations 50
 ```
 
 That's it. The agent will start iterating immediately. Next competition? Same steps:
