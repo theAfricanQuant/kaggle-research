@@ -1,2 +1,5 @@
-# Temporary test folder — remove after testing
+# Temporary test folder
 playground-jan-2021/
+# Python cache
+__pycache__/
+*.pyc
