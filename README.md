@@ -144,27 +144,60 @@ Works on Linux, macOS, and Windows (WSL2). Works on both CPU-only machines and G
 Let's run the [Tabular Playground Series](https://kaggle.com/competitions/tabular-playground-series-jan-2021) — a beginner-friendly synthetic dataset:
 
 ```bash
-# 1. Clone or copy this repo
+# 1. Clone the template (one-time)
 git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research
 
-# 2. Create the environment with uv
-uv init --python 3.12
-uv add kagglehub pandas numpy scikit-learn lightgbm xgboost catboost psutil optuna
+# 2. Bootstrap a named project folder for this competition
+./bootstrap.sh playground-jan-2021
 
-# 3. Set up your Kaggle API token (one-time)
-#    Go to kaggle.com/account → click "Create API Token"
-#    This downloads a kaggle.json file
-#    Place it here:
+# 3. Enter it, install deps
+cd playground-jan-2021
+uv sync
+
+# 4. Set up your Kaggle API token (one-time)
 mkdir -p ~/.kaggle
 cp ~/Downloads/kaggle.json ~/.kaggle/
 chmod 600 ~/.kaggle/kaggle.json
 
-# 4. Run the agent
+# 5. Run
 uv run main.py --competition "tabular-playground-series-jan-2021" --iterations 50
 ```
 
-That's it. The agent will start iterating immediately. You'll see output like:
+```bash
+# 1. Clone the template once
+git clone https://github.com/theAfricanQuant/kaggle-research.git
+cd kaggle-research
+
+# 2. Create a new project folder for your competition
+./bootstrap.sh household-electricity-consumption
+
+# 3. Enter it and install dependencies
+cd household-electricity-consumption
+uv sync
+
+# 4. Set up your Kaggle API token (one-time)
+#    Go to kaggle.com/account → click "Create API Token"
+#    This downloads a kaggle.json file
+mkdir -p ~/.kaggle
+cp ~/Downloads/kaggle.json ~/.kaggle/
+chmod 600 ~/.kaggle/kaggle.json
+
+# 5. Run the agent
+uv run main.py --competition "household-electricity-consumption" --iterations 50
+```
+
+That's it. The agent will start iterating immediately. Next competition? Same steps:
+
+```bash
+cd ~/kaggle-research
+./bootstrap.sh house-prices-advanced-regression-techniques
+cd house-prices-advanced-regression-techniques
+uv sync
+uv run main.py --competition "house-prices-advanced-regression-techniques" --iterations 50
+```
+
+Each competition gets its own folder with its own `.git`, its own `state/log.json`, and its own `pyproject.toml` named after the competition. You'll see output like:
 
 ```
 2026-07-07 10:30:00 | INFO | Hardware: GPU=True (NVIDIA RTX 4090) RAM=32GB Cores=16
@@ -209,7 +242,7 @@ brew install python@3.12
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Then restart your terminal (or run `source ~/.bashrc` / `source ~/.zshrc`).
+Then restart your terminal or run `source ~/.bashrc` (or `source ~/.zshrc`).
 
 ### Verifying the Kaggle API token
 
@@ -451,6 +484,9 @@ kaggle-research/
 │                              Run `uv sync` to install everything.
 │
 ├── .python-version          ← Tells uv to use Python 3.12.
+│
+├── bootstrap.sh             ← Create a named competition folder from this template.
+│                              Usage: `./bootstrap.sh my-competition-name`
 │
 ├── SKILL.md                 ← Entry point for AI coding agents. Describes the full
 │                              workflow, triggers, and decision tree in a format

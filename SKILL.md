@@ -55,6 +55,7 @@ The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family
 |---|---|---|
 | `pyproject.toml` | uv project config with dependencies |
 | `.python-version` | Python 3.12 |
+| `bootstrap.sh` | Create a named competition folder from this template |
 | `SKILL.md` | This file |
 | `main.py` | Autoresearch orchestrator |
 | `hardware.py` | GPU/RAM detection |
@@ -72,13 +73,15 @@ The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family
 ## Setup
 
 ```bash
-uv init --python 3.12
-uv add kagglehub pandas numpy scikit-learn lightgbm xgboost catboost psutil optuna
+# Bootstrap a named project folder for your competition
+./bootstrap.sh my-competition
+cd my-competition
+uv sync
 # API token: https://kaggle.com/account → Create API Token → ~/.kaggle/kaggle.json
 ```
 
 ## Run
 
 ```bash
-uv run main.py --competition "tabular-playground-series-jan-2021" --iterations 50
+uv run main.py --competition "my-competition-slug" --iterations 50
 ```
