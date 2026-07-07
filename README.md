@@ -1,46 +1,51 @@
 # kaggle-research
 
-An autonomous agent that runs Kaggle (and Zindi, DrivenData, etc.) competitions for you — automatically exploring models, tuning hyperparameters, ensembling, and submitting.
+An autonomous competition agent that runs Kaggle, Zindi, and DrivenData competitions for you. Implements the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit.
 
-Think of it as a **robust research assistant** that never forgets what it tried, never repeats a dead end, and always trusts cross-validation over leaderboard noise.
+Supports **classification** and **regression** — auto-detected from your data.
 
-It implements the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit. Originally described by [Andrej Karpathy](https://github.com/karpathy), now applied to data science competitions.
+## Quick start
 
-Supports **classification** and **regression** tasks — auto-detected from your data's target column. Designed to run anywhere: your laptop, a cloud VM, or even an AI coding agent (Claude Code, Codex).
+### For AI agents (opencode, Claude Code, Codex, pi.dev)
 
----
+**Step 1 — Install the skill (one-time)**
 
-## Table of Contents
+```bash
+git clone https://github.com/theAfricanQuant/kaggle-research.git
+# Copy to your agent's skills directory:
+cp -r kaggle-research ~/.config/opencode/skills/   # opencode
+# or
+cp -r kaggle-research ~/.claude/skills/             # Claude Code
+```
 
-- [Who is this for](#who-is-this-for)
-- [What it does, step by step](#what-it-does-step-by-step)
-- [The decision tree (how it chooses what to try next)](#the-decision-tree-how-it-chooses-what-to-try-next)
-- [Prerequisites](#prerequisites)
-- [Quick start: your first competition](#quick-start-your-first-competition)
-- [Complete setup guide](#complete-setup-guide)
-- [Running the agent](#running-the-agent)
-- [Understanding the output](#understanding-the-output)
-- [Example: walking through a real run](#example-walking-through-a-real-run)
-- [Using with Zindi.africa](#using-with-zindiafrica)
-- [Using with AI coding agents](#using-with-ai-coding-agents)
-- [The final push: Kaggle Notebook submission](#the-final-push-kaggle-notebook-submission)
-- [File-by-file breakdown](#file-by-file-breakdown)
-- [FAQ](#faq)
+**Step 2 — Use it**
 
----
+```bash
+mkdir my-competition && cd my-competition
+```
 
-## Who is this for
+Then tell your agent:
 
-- **You're new to Kaggle** — the agent handles the full pipeline, so you can learn by watching what it tries and what works.
-- **You're experienced but busy** — let the agent iterate through 50+ experiments while you focus on feature engineering or strategy.
-- **You use Zindi.africa** — same workflow; just change the competition slug.
-- **You use AI coding agents** — load `SKILL.md` and tell the agent to "run this competition."
+> "Use the kaggle-research skill on competition house-prices-advanced-regression-techniques"
+
+The agent reads the skill, copies template files into your folder, installs deps, scaffolds a project, and runs the full autoresearch loop — all autonomously. Just ensure `~/.kaggle/kaggle.json` exists.
+
+### Manual (without an agent)
+
+```bash
+git clone https://github.com/theAfricanQuant/kaggle-research.git
+cd kaggle-research
+uv sync
+uv run main.py --name house-prices --iterations 50
+cd house-prices
+uv run main.py --competition "house-prices-advanced-regression-techniques" --iterations 50
+```
 
 ---
 
 ## What it does, step by step
 
-When you run `main.py`, here is exactly what happens:
+When the agent runs `main.py`, here is exactly what happens:
 
 ### Step 1: Download the data
 
@@ -128,122 +133,18 @@ The decision is based on your current CV score:
 | 0.78-0.82 | Blending (Ridge meta-model) |
 | ≥0.82 | Stacking |
 
+---
+
 ## Prerequisites
 
 - **Python 3.9+** installed (3.12 recommended)
-- **uv** — fast Python package manager. Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **Kaggle account** — sign up at [kaggle.com](https://kaggle.com)
-- **Kaggle API token** — download from kaggle.com → Account → Create API Token → save to `~/.kaggle/kaggle.json`
+- **uv** — `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **Kaggle account** — [kaggle.com](https://kaggle.com)
+- **Kaggle API token** — kaggle.com/account → Create API Token → `~/.kaggle/kaggle.json`
 
-Works on Linux, macOS, and Windows (WSL2). Works on both CPU-only machines and GPU-equipped ones (NVIDIA CUDA).
+Works on Linux, macOS, Windows (WSL2), CPU-only or NVIDIA GPU.
 
 ---
-
-## Quick start: your first competition
-
-Let's run the [Tabular Playground Series](https://kaggle.com/competitions/tabular-playground-series-jan-2021):
-
-**Step 1 — Clone the template (one-time)**
-
-```bash
-git clone https://github.com/theAfricanQuant/kaggle-research.git
-cd kaggle-research
-```
-
-**Step 2 — Create a named project folder**
-
-```bash
-./bootstrap.sh playground-jan-2021
-cd playground-jan-2021
-```
-
-Or scaffold directly with `main.py` — no bootstrap.sh needed:
-
-```bash
-uv run main.py \
-  --competition "tabular-playground-series-jan-2021" \
-  --name playground-jan-2021 \
-  --iterations 50
-```
-
-This creates the folder, copies all template files, updates `pyproject.toml`, inits git, and exits. Send it to a custom location:
-
-```bash
-uv run main.py \
-  --competition "tabular-playground-series-jan-2021" \
-  --name playground-jan-2021 \
-  --out ~/Documents/07_DataScience/competition \
-  --iterations 50
-```
-
-**Step 3 — Install dependencies**
-
-```bash
-uv sync
-```
-
-**Step 4 — Set up your Kaggle API token (one-time)**
-
-```bash
-mkdir -p ~/.kaggle
-cp ~/Downloads/kaggle.json ~/.kaggle/
-chmod 600 ~/.kaggle/kaggle.json
-```
-
-Go to [kaggle.com/account](https://kaggle.com/account) → Create API Token to download `kaggle.json`.
-
-**Step 5 — Run the agent**
-
-```bash
-uv run main.py --competition "tabular-playground-series-jan-2021" --iterations 50
-```
-
-**Step 1 — Clone the template (one-time)**
-
-```bash
-git clone https://github.com/theAfricanQuant/kaggle-research.git
-cd kaggle-research
-```
-
-**Step 2 — Create a named project folder**
-
-```bash
-./bootstrap.sh my-competition
-cd my-competition
-```
-
-Or scaffold directly:
-
-```bash
-uv run main.py --competition "<slug>" --name my-competition --iterations 50
-cd my-competition
-```
-
-**Step 3 — Install dependencies**
-
-```bash
-uv sync
-```
-
-**Step 4 — Set up the Kaggle API token (one-time)**
-
-```bash
-mkdir -p ~/.kaggle
-cp ~/Downloads/kaggle.json ~/.kaggle/
-chmod 600 ~/.kaggle/kaggle.json
-```
-
-**Step 5 — Run**
-
-```bash
-uv run main.py --competition "<competition-slug>" --iterations 50
-```
-
-That's it. The agent will start iterating immediately. Next competition? Same steps:
-
-```bash
-cd ~/kaggle-research
-./bootstrap.sh house-prices-advanced-regression-techniques
 cd house-prices-advanced-regression-techniques
 uv sync
 uv run main.py --competition "house-prices-advanced-regression-techniques" --iterations 50
@@ -495,13 +396,24 @@ Zindi is Africa's data science competition platform. To use this agent with Zind
 
 ## Using with AI coding agents
 
-If you use Claude Code, Codex, or Cursor:
+**Step 1 — Install the skill (one-time)**
 
-1. Point the agent to the `SKILL.md` file. It contains the full workflow description in a format agents understand natively.
-2. Say: "Load the kaggle-research skill and run it on competition X."
-3. The agent reads the decision tree, understands the pipeline, and can execute the loop, interpret results, and iterate deeper on promising paths.
+```bash
+git clone https://github.com/theAfricanQuant/kaggle-research.git
+cp -r kaggle-research ~/.config/opencode/skills/   # opencode
+# or
+cp -r kaggle-research ~/.claude/skills/             # Claude Code
+```
 
-The `SKILL.md` and all Python code together let the agent act as a **Kaggle teammate** — one that never sleeps, never forgets what it tried, and always checks CV before declaring victory.
+**Step 2 — Use it**
+
+Create an empty folder, open your agent there, and say:
+
+> "Use the kaggle-research skill on competition house-prices-advanced-regression-techniques"
+
+The agent reads `SKILL.md`, copies the template files into your folder, installs deps, scaffolds a project, and runs the full autoresearch loop. It monitors `state/log.json` and reports back.
+
+The `SKILL.md` tells the agent exactly what to do step by step — no manual intervention needed beyond ensuring `~/.kaggle/kaggle.json` exists.
 
 ---
 
