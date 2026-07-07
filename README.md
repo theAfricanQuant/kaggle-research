@@ -150,11 +150,30 @@ git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research
 ```
 
-**Step 2 — Create a named project folder for this competition**
+**Step 2 — Create a named project folder**
 
 ```bash
 ./bootstrap.sh playground-jan-2021
 cd playground-jan-2021
+```
+
+Or scaffold directly with `main.py` — no bootstrap.sh needed:
+
+```bash
+uv run main.py \
+  --competition "tabular-playground-series-jan-2021" \
+  --name playground-jan-2021 \
+  --iterations 50
+```
+
+This creates the folder, copies all template files, updates `pyproject.toml`, inits git, and exits. Send it to a custom location:
+
+```bash
+uv run main.py \
+  --competition "tabular-playground-series-jan-2021" \
+  --name playground-jan-2021 \
+  --out ~/Documents/07_DataScience/competition \
+  --iterations 50
 ```
 
 **Step 3 — Install dependencies**
@@ -186,10 +205,17 @@ git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research
 ```
 
-**Step 2 — Bootstrap a new project folder**
+**Step 2 — Create a named project folder**
 
 ```bash
 ./bootstrap.sh my-competition
+cd my-competition
+```
+
+Or scaffold directly:
+
+```bash
+uv run main.py --competition "<slug>" --name my-competition --iterations 50
 cd my-competition
 ```
 
@@ -300,14 +326,15 @@ uv run main.py --competition "<competition-slug>" --iterations 50
 ### All command-line flags
 
 | Flag | Default | What it does |
-|---|---|---|
-| `--competition` | (required) | The competition slug. For Kaggle: `"tabular-playground-series-jan-2021"`. For Zindi: `"zindi-competition-name"` |
-| `--iterations` | 50 | Total hypotheses to test. More is better but slower. 30-50 is a sensible range. |
-| `--submission-interval` | 5 | How often (in iterations) to submit to the leaderboard. Starts at iteration 10. |
-| `--final-days` | 3 | If competition has <3 days left, submit every iteration for maximum shots. |
-| `--task` | `auto` | Force task type: `classification` or `regression`. Usually not needed. |
-| `--metric` | `auto` | Optimisation metric. Classification: `roc_auc`, `logloss`, `accuracy`, `f1`. Regression: `rmse`, `mae`, `r2`. |
-| `--optuna-trials` | 50 | How many parameter combinations Optuna tries per tuning session. Higher = better params but slower. |
+|---|---|---|---|
+| `--competition` | (required) | Competition slug. Kaggle: `"tabular-playground-series-jan-2021"`. Zindi: `"zindi-competition-name"` |
+| `--name` | none | Scaffold a new project folder with this name, copy all files, init git, then exit |
+| `--out` | current dir | Parent directory for `--name` (e.g., `~/Documents/07_DataScience/competition`) |
+| `--iterations` | 50 | Total hypotheses to test |
+| `--submission-interval` | 5 | How often to submit to the leaderboard (starts at iteration 10) |
+| `--metric` | `auto` | Optimisation metric. Classification: `roc_auc`, `logloss`, `accuracy`, `f1`. Regression: `rmse`, `mae`, `r2` |
+| `--optuna-trials` | 50 | Hyperparameter trials per tuning session |
+| `--task` | `auto` | Force task type: `classification`, `regression` |
 
 ### Example: tuning for RMSE on a regression competition
 

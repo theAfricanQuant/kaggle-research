@@ -3,18 +3,9 @@ from datetime import datetime
 from pathlib import Path
 
 from hardware import detect_hardware
-from worker import dispatch_workers
-from pipeline.download import fetch_data
-from pipeline.validate import get_data, detect_task
-from pipeline.submit import kaggle_submit, poll_for_score
-from state.log import load_state, save_state, LogEntry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("kaggle-research")
-
-HERE = Path(__file__).parent
-STATE_DIR = HERE / "state"
-
 
 METRICS_CLS = ["roc_auc", "logloss", "accuracy", "f1"]
 METRICS_REG = ["rmse", "mae", "r2"]
@@ -23,9 +14,13 @@ METRICS_REG = ["rmse", "mae", "r2"]
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--competition", required=True)
+    parser.add_argument("--name", default=None,
+                        help="Project folder name. Creates and scaffolds a new folder if provided. "
+                             "Default: run in-place.")
+    parser.add_argument("--out", default=None,
+                        help="Parent directory for --name (default: current directory).")
     parser.add_argument("--iterations", type=int, default=50)
     parser.add_argument("--submission-interval", type=int, default=5)
-    parser.add_argument("--final-days", type=int, default=3)
     parser.add_argument("--task", choices=["classification", "regression", "auto"], default="auto")
     parser.add_argument("--metric", default="auto",
                         help=f"Optimisation metric. Auto: roc_auc (cls) or r2 (reg). "
@@ -34,7 +29,51 @@ def main():
                         help="Trials per Optuna study when tuning")
     args = parser.parse_args()
 
+    HERE = Path(__file__).parent.resolve()
+
+    # Scaffold a named project folder if --name is given
+    if args.name:
+        parent = Path(args.out).resolve() if args.out else HERE
+        dest = parent / args.name
+        if dest.exists():
+            log.error(f"Folder already exists: {dest}")
+            sys.exit(1)
+        log.info(f"Scaffolding new project: {dest}")
+        import shutil, subprocess
+        for item in HERE.iterdir():
+            if item.name in (".git", "__pycache__"):
+                continue
+            if item.is_dir():
+                shutil.copytree(item, dest / item.name,
+                                ignore=lambda d, f: {"__pycache__"})
+            else:
+                shutil.copy2(item, dest / item.name)
+        (dest / "pyproject.toml").write_text(
+            (dest / "pyproject.toml").read_text().replace(
+                'name = "kaggle-research"', f'name = "{args.name}"'
+            )
+        )
+        (dest / ".python-version").write_text("3.12\n")
+        # Remove stale state log
+        (dest / "state" / "log.json").unlink(missing_ok=True)
+        # Init git
+        subprocess.run(["git", "init", "-q"], cwd=dest)
+        subprocess.run(["git", "add", "-A"], cwd=dest)
+        subprocess.run(["git", "commit", "-q", "-m", f"initial: {args.name}"], cwd=dest)
+        log.info(f"Project created. Switch to it and run:\n"
+                 f"  cd {dest}\n"
+                 f"  uv sync\n"
+                 f"  uv run main.py --competition \"{args.competition}\" --iterations {args.iterations}")
+        return  # exit so user enters the folder and runs
+
     hw = detect_hardware()
+    STATE_DIR = HERE / "state"
+
+    from worker import dispatch_workers
+    from pipeline.download import fetch_data
+    from pipeline.validate import get_data, detect_task
+    from pipeline.submit import kaggle_submit, poll_for_score
+    from state.log import load_state, save_state, LogEntry
     log.info(f"Hardware: GPU={hw['gpu']} ({hw['gpu_name']}) "
              f"RAM={hw['ram_gb']}GB Cores={hw['cores']} "
              f"Kaggle env={hw['on_kaggle']}")
