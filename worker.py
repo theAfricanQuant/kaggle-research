@@ -1,23 +1,27 @@
-def dispatch_workers(hypotheses, data_path, hw, task):
+def dispatch_workers(hypotheses, data_path, hw, task, metric="roc_auc", optuna_trials=50):
     results = []
     for hyp in hypotheses:
-        res = _run_hypothesis(hyp, data_path, hw, task)
+        res = _run_hypothesis(hyp, data_path, hw, task, metric, optuna_trials)
         if res:
             results.append(res)
     return results
 
 
-def _run_hypothesis(hyp, data_path, hw, task):
+def _run_hypothesis(hyp, data_path, hw, task, metric, optuna_trials):
     if hyp == "stratified_5fold_lgbm_defaults":
         return _baseline(data_path, hw, task)
     elif hyp == "feature_engineering_target_encoding":
         return _with_feature_engineering(data_path, hw, task, ["target_encoding"])
     elif hyp == "feature_engineering_interactions":
         return _with_feature_engineering(data_path, hw, task, ["interactions"])
-    elif hyp == "try_xgboost_with_tuning":
-        return _train_specific(data_path, hw, task, "xgb")
-    elif hyp == "try_catboost_with_tuning":
-        return _train_specific(data_path, hw, task, "catboost")
+    elif hyp == "optuna_xgb":
+        return _tuned_model(data_path, hw, task, "xgb", metric, optuna_trials)
+    elif hyp == "optuna_lgbm":
+        return _tuned_model(data_path, hw, task, "lgbm", metric, optuna_trials)
+    elif hyp == "optuna_catboost":
+        return _tuned_model(data_path, hw, task, "catboost", metric, optuna_trials)
+    elif hyp == "depth1_xgb_ensemble":
+        return _depth1_ensemble(data_path, hw, task)
     elif hyp == "average_lgbm_xgb_catboost":
         return _ensemble_average(data_path, hw, task)
     elif hyp == "blend_with_meta_model":
@@ -52,18 +56,45 @@ def _with_feature_engineering(data_path, hw, task, transforms):
             "model_path": None, "preds_path": None}
 
 
-def _train_specific(data_path, hw, task, model_type):
-    from pipeline.validate import get_data
-    from pipeline.train import train_lgbm, train_xgb, train_catboost
-    from pipeline.validate import cross_val_score
+def _tuned_model(data_path, hw, task, model_type, metric, optuna_trials):
+    from pipeline.validate import get_data, cross_val_score
+    from pipeline.tuner import tune_xgb, tune_lgbm, tune_catboost
+    from pipeline.train import train_tuned_xgb, train_tuned_lgbm, train_tuned_catboost
 
     X, y, _ = get_data(data_path)
-    fn = {"xgb": train_xgb, "catboost": train_catboost}.get(model_type)
-    if not fn:
+
+    tuner_map = {"xgb": tune_xgb, "lgbm": tune_lgbm, "catboost": tune_catboost}
+    trainer_map = {
+        "xgb": train_tuned_xgb, "lgbm": train_tuned_lgbm, "catboost": train_tuned_catboost,
+    }
+
+    tuner = tuner_map.get(model_type)
+    trainer = trainer_map.get(model_type)
+    if not tuner or not trainer:
         return None
-    model, oof = fn(X, y, hw, task)
+
+    log = __import__("logging").getLogger("kaggle-research")
+    log.info(f"  Optuna tuning {model_type} ({optuna_trials} trials, metric={metric})...")
+    best_params = tuner(X, y, task, hw, metric=metric, n_trials=optuna_trials)
+    log.info(f"  Best {model_type} params: {best_params}")
+    _, oof = trainer(X, y, hw, task, best_params)
     cv = cross_val_score(y, oof, task)
-    return {"hypothesis": f"try_{model_type}", "cv_score": cv,
+    return {"hypothesis": f"optuna_{model_type}", "cv_score": cv,
+            "model_path": None, "preds_path": None}
+
+
+def _depth1_ensemble(data_path, hw, task):
+    from pipeline.validate import get_data
+    from pipeline.train import train_depth1_xgb, train_lgbm
+    from pipeline.validate import cross_val_score
+    import numpy as np
+
+    X, y, _ = get_data(data_path)
+    _, oof_d1 = train_depth1_xgb(X, y, hw, task)
+    _, oof_l = train_lgbm(X, y, hw, task)
+    oof_avg = np.column_stack([oof_d1, oof_l]).mean(axis=1)
+    cv = cross_val_score(y, oof_avg, task)
+    return {"hypothesis": "depth1_xgb_ensemble", "cv_score": cv,
             "model_path": None, "preds_path": None}
 
 

@@ -18,20 +18,22 @@ User says any of: "run a Kaggle competition", "compete for me", "autoresearch th
 ## Decision tree (next hypothesis router)
 
 ```
-if no baseline yet:
-  → stratified 5-fold + LightGBM defaults
+Phase 1 — defaults (iterations 1-10):
+  iterations 1-4:   LightGBM baseline + feature engineering
+  iterations 5-9:   try default XGBoost / CatBoost
+  iteration 10:     Depth-1 XGBoost (GAM-like) ensemble
 
-elif CV stable but below top 20%:
-  → feature engineering (high-cardinality → target encoding, dates → decompositions)
+Phase 2 — Optuna tuning (from iteration 11, gated by CV score):
+  low CV:      Optuna-tuned XGBoost (50 trials, TPE sampler)
+  mid-low CV:  Optuna-tuned LightGBM
+  mid CV:      Optuna-tuned CatBoost
+  mid-high CV: Depth-1 XGBoost ensemble → average → blend → stack
 
-elif single model plateaued:
-  → try a second model type → averaging → blending → stacking
-
-elif CV != LB (correlation < 0.5):
-  → adversarial validation → fix split strategy
-
-elif <3 days remaining:
-  → stop iterating → ensemble top-k by CV → submit best 2
+At any point:
+  if CV != LB (correlation < 0.5):
+    → adversarial validation → fix split strategy
+  if <3 days remaining:
+    → stop iterating → ensemble top-k by CV → submit best 2
 ```
 
 ## Task detection
@@ -58,8 +60,9 @@ The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family
 | `hardware.py` | GPU/RAM detection |
 | `worker.py` | Parallel hypothesis runner |
 | `pipeline/download.py` | kagglehub data fetcher |
-| `pipeline/validate.py` | CV scoring |
-| `pipeline/train.py` | Model training |
+| `pipeline/validate.py` | CV scoring, task detection |
+| `pipeline/tuner.py` | Optuna 5-stage stepwise tuning (XGB/LGBM/Cat) |
+| `pipeline/train.py` | Model training (default + tuned + depth-1) |
 | `pipeline/features.py` | Feature engineering |
 | `pipeline/ensemble.py` | Blending/stacking/averaging |
 | `pipeline/submit.py` | Kaggle submission |
@@ -70,7 +73,7 @@ The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family
 
 ```bash
 uv init --python 3.12
-uv add kagglehub pandas numpy scikit-learn lightgbm xgboost catboost psutil
+uv add kagglehub pandas numpy scikit-learn lightgbm xgboost catboost psutil optuna
 # API token: https://kaggle.com/account → Create API Token → ~/.kaggle/kaggle.json
 ```
 

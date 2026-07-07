@@ -1,11 +1,11 @@
-import os, sys, json, time, argparse, logging
+import os, sys, json, argparse, logging
 from datetime import datetime
 from pathlib import Path
 
 from hardware import detect_hardware
 from worker import dispatch_workers
 from pipeline.download import fetch_data
-from pipeline.validate import cross_val_score, get_data, detect_task
+from pipeline.validate import get_data, detect_task
 from pipeline.submit import kaggle_submit, poll_for_score
 from state.log import load_state, save_state, LogEntry
 
@@ -16,6 +16,10 @@ HERE = Path(__file__).parent
 STATE_DIR = HERE / "state"
 
 
+METRICS_CLS = ["roc_auc", "logloss", "accuracy", "f1"]
+METRICS_REG = ["rmse", "mae", "r2"]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--competition", required=True)
@@ -23,6 +27,11 @@ def main():
     parser.add_argument("--submission-interval", type=int, default=5)
     parser.add_argument("--final-days", type=int, default=3)
     parser.add_argument("--task", choices=["classification", "regression", "auto"], default="auto")
+    parser.add_argument("--metric", default="auto",
+                        help=f"Optimisation metric. Auto: roc_auc (cls) or r2 (reg). "
+                             f"Classification: {METRICS_CLS}. Regression: {METRICS_REG}.")
+    parser.add_argument("--optuna-trials", type=int, default=50,
+                        help="Trials per Optuna study when tuning")
     args = parser.parse_args()
 
     hw = detect_hardware()
@@ -40,25 +49,32 @@ def main():
         task = args.task
         log.info(f"Task: {task}")
 
+    metric = args.metric
+    if metric == "auto":
+        metric = "roc_auc" if task == "classification" else "r2"
+    log.info(f"Optimising for: {metric}")
+
     state = load_state(STATE_DIR / "log.json")
     state.setdefault("competition", args.competition)
     state.setdefault("task", task)
+    state.setdefault("metric", metric)
     state.setdefault("iterations", [])
     save_state(STATE_DIR / "log.json", state)
-
-    day_zero = datetime.now()
 
     for iteration in range(1, args.iterations + 1):
         log.info(f"=== Iteration {iteration}/{args.iterations} ===")
 
-        hypothesis = route_next_hypothesis(state, task)
+        hypothesis = route_next_hypothesis(state, task, args.optuna_trials)
         log.info(f"Hypothesis: {hypothesis}")
 
-        results = dispatch_workers([hypothesis], data_path, hw, task)
+        results = dispatch_workers(
+            [hypothesis], data_path, hw, task,
+            metric=metric, optuna_trials=args.optuna_trials
+        )
         if not results:
             continue
 
-        best = max(results, key=lambda r: r["cv_score"])
+        best = _pick_best(results, metric, task)
         entry = LogEntry(
             iteration=iteration,
             hypothesis=hypothesis,
@@ -71,19 +87,9 @@ def main():
         )
         state["iterations"].append(entry.to_dict())
 
-        if state.get("latest_cv") is None or entry.delta > 1e-4:
-            symbol = "✅" if entry.delta > 1e-4 else "📋"
-            log.info(f"{symbol} CV: {_fmt(entry.cv_before)} → {_fmt(entry.cv_after)} (Δ{entry.delta:+.4f})")
-            state["latest_cv"] = entry.cv_after
-            state["best_model_path"] = best.get("model_path")
-        else:
-            log.info(f"❌ No improvement (Δ{entry.delta:+.4f}) — reverted")
-            if entry.cv_before is not None:
-                state["latest_cv"] = entry.cv_before
+        _apply_improvement(state, entry)
 
-        should_submit = (
-            iteration >= 10 and iteration % args.submission_interval == 0
-        )
+        should_submit = iteration >= 10 and iteration % args.submission_interval == 0
         if should_submit:
             sub = kaggle_submit(best["preds_path"], f"iter {iteration}: {hypothesis[:60]}")
             lb_score = poll_for_score(sub, args.competition)
@@ -99,43 +105,80 @@ def main():
     log.info(f"Best CV: {_fmt(state.get('latest_cv'))} | Best LB: {state.get('last_lb')}")
 
 
-def route_next_hypothesis(state, task):
+def route_next_hypothesis(state, task, optuna_trials):
     if "latest_cv" not in state or state["latest_cv"] is None:
         return "stratified_5fold_lgbm_defaults"
 
     cv = state["latest_cv"]
     n = len(state["iterations"])
+    cls = task == "classification"
 
-    if task == "classification":
-        if n < 5:
-            return "feature_engineering_target_encoding"
-        elif cv < 0.7:
-            return "feature_engineering_interactions"
-        elif cv < 0.8:
-            return "try_xgboost_with_tuning"
-        elif cv < 0.85:
-            return "try_catboost_with_tuning"
-        elif cv < 0.88:
-            return "average_lgbm_xgb_catboost"
-        elif cv < 0.9:
-            return "blend_with_meta_model"
+    thresholds = {
+        "fe_target_encoding": (None, 0.50) if not cls else (None, 0.70),
+        "fe_interactions":    (0.50, 0.55) if not cls else (0.70, 0.75),
+        "optuna_xgb":         (0.55, 0.65) if not cls else (0.75, 0.82),
+        "optuna_lgbm":        (0.65, 0.70) if not cls else (0.82, 0.85),
+        "optuna_catboost":    (0.70, 0.75) if not cls else (0.85, 0.87),
+        "depth1_xgb":         None,
+        "average":            None,
+        "blend":              None,
+        "stack":              None,
+    }
+
+    if n < 5:
+        return "feature_engineering_target_encoding"
+    elif n < 10:
+        return "feature_engineering_interactions"
+
+    for hyp, (lo, hi) in thresholds.items():
+        if lo is None and hi is None:
+            continue
+        if lo is None:
+            if cv < hi:
+                return hyp
+        elif hi is None:
+            if cv >= lo:
+                return hyp
         else:
-            return "stack_ensemble_all_top_models"
+            if lo <= cv < hi:
+                return hyp
+
+    if cv >= (0.75 if not cls else 0.87):
+        return "depth1_xgb_ensemble"
+    elif cv >= (0.78 if not cls else 0.88):
+        return "average_lgbm_xgb_catboost"
+    elif cv >= (0.82 if not cls else 0.9):
+        return "blend_with_meta_model"
     else:
-        if n < 5:
-            return "feature_engineering_target_encoding"
-        elif cv < 0.5:
-            return "feature_engineering_interactions"
-        elif cv < 0.65:
-            return "try_xgboost_with_tuning"
-        elif cv < 0.75:
-            return "try_catboost_with_tuning"
-        elif cv < 0.8:
-            return "average_lgbm_xgb_catboost"
-        elif cv < 0.85:
-            return "blend_with_meta_model"
-        else:
-            return "stack_ensemble_all_top_models"
+        return "stack_ensemble_all_top_models"
+
+
+def _pick_best(results, metric, task):
+    higher_is_better = metric in ("roc_auc", "r2", "accuracy", "f1")
+    key = (lambda r: r["cv_score"]) if higher_is_better else (lambda r: -r["cv_score"])
+    return max(results, key=key)
+
+
+def _apply_improvement(state, entry):
+    higher_is_better = state.get("metric", "roc_auc") in ("roc_auc", "r2", "accuracy", "f1")
+    prev = state.get("latest_cv")
+
+    if prev is None:
+        improved = True
+    elif higher_is_better:
+        improved = entry.delta > 1e-4
+    else:
+        improved = entry.delta < -1e-4
+
+    if improved:
+        symbol = "✅" if entry.cv_before is not None else "📋"
+        log.info(f"{symbol} CV: {_fmt(entry.cv_before)} → {_fmt(entry.cv_after)} (Δ{entry.delta:+.4f})")
+        state["latest_cv"] = entry.cv_after
+        state["best_model_path"] = entry.model_path
+    else:
+        log.info(f"❌ No improvement (Δ{entry.delta:+.4f}) — reverted")
+        if entry.cv_before is not None:
+            state["latest_cv"] = entry.cv_before
 
 
 def _fmt(v):

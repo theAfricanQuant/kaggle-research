@@ -12,4 +12,5 @@ dependencies = [
     "xgboost>=2.0",
     "catboost>=1.2",
     "psutil>=5.9",
+    "optuna>=3.0",
 ]

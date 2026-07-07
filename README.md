@@ -20,31 +20,29 @@ main.py orchestrates the loop:
   → final push: ensemble top-k models
 ```
 
-The decision tree automatically routes to the next hypothesis based on current CV score and iteration count:
+The decision tree routes through **two phases** — defaults first (manual params), then Optuna-tuned variants once the data has been explored:
 
-### Classification (ROC-AUC)
+**Phase 1 — Defaults (iterations 1-10)**
 
-| CV Score | Next Hypothesis |
+| Iterations | Hypothesis |
 |---|---|
-| No baseline yet | Stratified 5-fold + LightGBM defaults |
-| <0.70 | Feature engineering (target encoding) |
-| <0.80 | Try XGBoost with tuning |
-| <0.85 | Try CatBoost with tuning |
-| <0.88 | Average LGBM + XGB + CatBoost |
-| <0.90 | Blend with logistic regression meta-model |
-| ≥0.90 | Stack ensemble of all top models |
+| 1-4 | LightGBM baseline + feature engineering |
+| 5-9 | Try default XGBoost / CatBoost |
+| 10 | Depth-1 XGBoost (GAM-like) ensemble |
 
-### Regression (R²)
+**Phase 2 — Optuna Tuning (from iteration 11, by CV score)**
 
-| CV Score | Next Hypothesis |
-|---|---|
-| No baseline yet | 5-fold + LightGBM defaults |
-| <0.50 | Feature engineering (target encoding) |
-| <0.65 | Try XGBoost with tuning |
-| <0.75 | Try CatBoost with tuning |
-| <0.80 | Average LGBM + XGB + CatBoost |
-| <0.85 | Blend with ridge regression meta-model |
-| ≥0.85 | Stack ensemble of all top models |
+| Classif. (ROC-AUC) | Regr. (R²) | Hypothesis |
+|---|---|---|
+| <0.75 | <0.55 | Optuna-tuned XGBoost (50 trials, TPE sampler) |
+| 0.75-0.82 | 0.55-0.65 | Optuna-tuned LightGBM |
+| 0.82-0.85 | 0.65-0.70 | Optuna-tuned CatBoost |
+| 0.85-0.87 | 0.70-0.75 | Depth-1 XGBoost + LightGBM ensemble |
+| 0.87-0.88 | 0.75-0.78 | Average LGBM + XGB + CatBoost |
+| 0.88-0.90 | 0.78-0.82 | Blend (logistic / ridge meta-model) |
+| ≥0.90 | ≥0.82 | Stack ensemble of all top models |
+
+Each tuned model uses **Optuna TPE** with 5-fold CV, early stopping, and metric-aware optimisation (different learning rate for AUC vs logloss vs RMSE).
 
 Hardware awareness auto-detects GPU/VRAM/RAM and adjusts parallelism, model depth, and batch sizes accordingly.
 
@@ -79,6 +77,8 @@ uv run main.py \
 | `--submission-interval` | 5 | How often to submit to the leaderboard (skipped for first 10 iterations) |
 | `--final-days` | 3 | When <3 days remain in competition, submit every iteration |
 | `--task` | `auto` | Force task: `classification`, `regression`, or `auto`-detect |
+| `--metric` | `auto` | Optimisation metric: `roc_auc`, `logloss`, `rmse`, `mae`, `r2`, `accuracy`, `f1` |
+| `--optuna-trials` | 50 | Trials per Optuna study when tuning |
 
 ## File layout
 
