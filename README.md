@@ -2,6 +2,8 @@
 
 An autonomous Kaggle competition agent that implements the **autoresearch** pattern: hypothesise → implement → CV verify → keep/revert → submit.
 
+Supports both **classification** and **regression** tasks — auto-detected from the target column.
+
 Designed for AI coding agents (Claude Code, Codex, Cursor) to run competitions end-to-end without manual iteration.
 
 ## How it works
@@ -20,6 +22,8 @@ main.py orchestrates the loop:
 
 The decision tree automatically routes to the next hypothesis based on current CV score and iteration count:
 
+### Classification (ROC-AUC)
+
 | CV Score | Next Hypothesis |
 |---|---|
 | No baseline yet | Stratified 5-fold + LightGBM defaults |
@@ -29,6 +33,18 @@ The decision tree automatically routes to the next hypothesis based on current C
 | <0.88 | Average LGBM + XGB + CatBoost |
 | <0.90 | Blend with logistic regression meta-model |
 | ≥0.90 | Stack ensemble of all top models |
+
+### Regression (R²)
+
+| CV Score | Next Hypothesis |
+|---|---|
+| No baseline yet | 5-fold + LightGBM defaults |
+| <0.50 | Feature engineering (target encoding) |
+| <0.65 | Try XGBoost with tuning |
+| <0.75 | Try CatBoost with tuning |
+| <0.80 | Average LGBM + XGB + CatBoost |
+| <0.85 | Blend with ridge regression meta-model |
+| ≥0.85 | Stack ensemble of all top models |
 
 Hardware awareness auto-detects GPU/VRAM/RAM and adjusts parallelism, model depth, and batch sizes accordingly.
 
@@ -61,6 +77,7 @@ python main.py \
 | `--iterations` | 50 | Total hypotheses to test |
 | `--submission-interval` | 5 | How often to submit to the leaderboard (skipped for first 10 iterations) |
 | `--final-days` | 3 | When <3 days remain in competition, submit every iteration |
+| `--task` | `auto` | Force task: `classification`, `regression`, or `auto`-detect |
 
 ## File layout
 

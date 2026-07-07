@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.model_selection import KFold
 
 
-def engineer_features(X, y, transforms):
+def engineer_features(X, y, transforms, task):
     X = X.copy()
     if isinstance(X, np.ndarray):
         X = pd.DataFrame(X)

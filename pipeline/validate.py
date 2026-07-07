@@ -1,7 +1,19 @@
 import os, pandas as pd
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold, KFold
+from sklearn.metrics import roc_auc_score, r2_score
+
+
+def detect_task(y):
+    if np.issubdtype(y.dtype, np.integer) and len(np.unique(y)) <= 20:
+        return "classification"
+    if np.issubdtype(y.dtype, np.floating):
+        if len(np.unique(y)) <= 10:
+            return "classification"
+        return "regression"
+    if y.dtype == bool or y.dtype == object:
+        return "classification"
+    return "regression"
 
 
 def get_data(data_path, sample_frac=1.0):
@@ -16,8 +28,17 @@ def get_data(data_path, sample_frac=1.0):
     y = df[target_col].values
     X = df.drop(columns=[c for c in [target_col, id_col] if c and c in df.columns])
     X = X.select_dtypes(include=[np.number]).fillna(-1)
-    return X.values, y
+    task = detect_task(y)
+    return X.values, y, task
 
 
-def cross_val_score(y_true, y_pred):
-    return roc_auc_score(y_true, y_pred)
+def get_splitter(task, n_splits=5, random_state=42):
+    if task == "classification":
+        return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    return KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+
+def cross_val_score(y_true, y_pred, task):
+    if task == "classification":
+        return roc_auc_score(y_true, y_pred)
+    return r2_score(y_true, y_pred)

@@ -34,6 +34,15 @@ elif <3 days remaining:
   → stop iterating → ensemble top-k by CV → submit best 2
 ```
 
+## Task detection
+
+The orchestrator auto-detects whether the competition is **classification** or **regression**:
+
+- **Classification** (integer target, ≤20 unique values): ROC-AUC scoring, `StratifiedKFold`, `predict_proba` outputs
+- **Regression** (float target, >10 unique values): R² scoring, `KFold`, direct `predict` outputs
+
+Override with `--task classification` or `--task regression`.
+
 ## Hardware awareness
 
 The orchestrator auto-detects GPU/VRAM/RAM and adjusts parallelism, model family, and batch sizes. See `hardware.py`.
