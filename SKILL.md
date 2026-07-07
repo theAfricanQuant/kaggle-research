@@ -4,67 +4,66 @@ Autonomous Kaggle/Zindi competition agent. Uses the **autoresearch pattern**: hy
 
 ## When the user says
 
-"Run competition X", "compete for me on Kaggle", "autoresearch this competition", "iterate on my model", "find the best ensemble".
+"Run competition X", "compete for me on Kaggle", "autoresearch this competition", "iterate on my model", "find the best ensemble", "use the kaggle-research skill".
 
-## Your job (the agent)
+## What you need to do
 
-Run experiments autonomously. The goal: find the best model for the competition by iterating through hypotheses, keeping only what improves CV score.
+The user is in an empty project folder. Your job is to:
+
+1. Copy this skill's template files into the current working directory (the skill's base directory is listed at the top of this file — copy everything from there)
+2. Install dependencies
+3. Ensure the Kaggle API token is set up
+4. Scaffold a named project folder
+5. Run the autoresearch loop
+6. Monitor progress and report back
 
 ## Step-by-step execution
 
-### 0. Setup
+### 1. Copy template files into the current directory
 
-If this is the first run:
+The skill's base directory was shown when this skill was loaded. Copy everything from there (except `.git/`, `__pycache__/`, `bootstrap.sh`) into the current working directory. Use `cp -r`, `rsync`, or `shutil.copytree` — whichever you prefer.
+
+### 2. Install dependencies
 
 ```bash
-# Ensure uv is installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install dependencies
-cd kaggle-research
 uv sync
-
-# Ensure Kaggle API token exists
-mkdir -p ~/.kaggle
-# Ask user to download from kaggle.com/account → Create API Token
-# and place at ~/.kaggle/kaggle.json
 ```
 
-### 1. Scaffold a project folder
+### 3. Ensure Kaggle API token
 
-Create a folder named after the competition:
+```bash
+mkdir -p ~/.kaggle
+```
+
+If `~/.kaggle/kaggle.json` doesn't exist, ask the user to download it from kaggle.com/account → Create API Token and place it there.
+
+### 4. Scaffold a project folder
 
 ```bash
 uv run main.py --competition "<slug>" --name <slug> --iterations 50
 cd <slug>
-uv sync
 ```
 
-Ask the user to set their API token if not already done. Then proceed.
-
-### 2. Run the autoresearch loop
+### 5. Run the autoresearch loop
 
 ```bash
 uv run main.py --competition "<slug>" --iterations 50
 ```
 
-### 3. Monitor progress
+### 6. Monitor
 
-The agent should check `state/log.json` after each submission to track:
-- **latest_cv** — is it trending up?
-- **lb_score** — how does it compare to CV? (correlation check)
-- **hypothesis** — what was tried, what worked
+Check `state/log.json` after each submission block. Report to the user:
+- Current best CV score
+- What hypothesis worked best
+- CV vs leaderboard alignment
+- When iterations are done, the final score
 
-### 4. Intervene if needed
-
-If CV-LB correlation < 0.3 (validation is broken), suggest adversarial validation or a different split strategy. If the user has ideas (e.g., "try this feature"), add them as hypothesis branches in `worker.py`.
-
-## Decision tree (what to try next)
+## Decision tree
 
 The orchestrator auto-routes, but here's the logic so you understand:
 
 **Phase 1 — Defaults (iterations 1-10)**
-Fast baselines, no tuning:
+Fast baselines, no tuning.
 1-4: LightGBM defaults → feature engineering (target encoding, interactions)
 5-9: Default XGBoost → default CatBoost
 10: Depth-1 XGBoost + LightGBM ensemble
@@ -93,14 +92,14 @@ Regression (R²):
 | 0.78-0.82 | Blend (meta-model) |
 | ≥0.82 | Stack |
 
-## Architecture (so you can extend)
+## File layout for reference
 
 | File | Role |
 |---|---|
 | `main.py` | Orchestrator — loop, routing, CV gating, submission |
 | `hardware.py` | GPU/RAM/core detection |
-| `worker.py` | Hypothesis dispatcher (maps names to functions) |
-| `pipeline/train.py` | All model trainers (default + tuned + depth-1) |
+| `worker.py` | Hypothesis dispatcher |
+| `pipeline/train.py` | Model trainers (default + tuned + depth-1) |
 | `pipeline/tuner.py` | Optuna 5-stage stepwise tuning |
 | `pipeline/validate.py` | CV scoring, task detection |
 | `pipeline/features.py` | Feature engineering |
@@ -109,8 +108,6 @@ Regression (R²):
 | `pipeline/submit.py` | Submission + score polling |
 | `state/log.py` | Experiment logger |
 
+## Extending
+
 To add a new hypothesis: add a function in `worker.py` and map it in `_run_hypothesis`. The router in `main.py` auto-picks the next one based on CV.
-
-## Files the agent should NOT modify
-
-`pipeline/download.py`, `pipeline/submit.py`, `hardware.py`, `state/log.py` — these have no tuning value. Focus on `main.py` routing, `worker.py` dispatch, `pipeline/train.py` models, and `pipeline/features.py` engineering.
