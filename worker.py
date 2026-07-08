@@ -113,7 +113,7 @@ def _depth1_ensemble(data_path, hw, task):
 
 def _ensemble_average(data_path, hw, task):
     from pipeline.validate import get_data
-    from pipeline.train import train_lgbm, train_xgb, train_catboost
+    from pipeline.train import train_lgbm, train_xgb, train_catboost, train_tfdf
     from pipeline.validate import cross_val_score
     import numpy as np
 
@@ -121,7 +121,8 @@ def _ensemble_average(data_path, hw, task):
     _, oof_l = train_lgbm(X, y, hw, task)
     _, oof_x = train_xgb(X, y, hw, task)
     _, oof_c = train_catboost(X, y, hw, task)
-    oof_avg = np.column_stack([oof_l, oof_x, oof_c]).mean(axis=1)
+    _, oof_t = train_tfdf(X, y, hw, task)
+    oof_avg = np.column_stack([oof_l, oof_x, oof_c, oof_t]).mean(axis=1)
     cv = cross_val_score(y, oof_avg, task)
     return {"hypothesis": "average_lgbm_xgb_catboost", "cv_score": cv,
             "model_path": None, "preds_path": None}
@@ -132,7 +133,7 @@ def _blend(data_path, hw, task):
     from sklearn.model_selection import train_test_split
     from sklearn.linear_model import LogisticRegression, Ridge
     from pipeline.validate import get_data
-    from pipeline.train import train_lgbm, train_xgb, train_catboost
+    from pipeline.train import train_lgbm, train_xgb, train_catboost, train_tfdf
 
     X, y, _ = get_data(data_path)
     X_tr, X_bl, y_tr, y_bl = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -141,7 +142,7 @@ def _blend(data_path, hw, task):
         m = model_preds_tuple[0]
         if hasattr(m, "predict_proba"):
             return m.predict_proba(X_bl)[:, 1]
-        return m.predict(X_bl)
+        return m.predict(X_bl).ravel()
 
     def oof_on_holdout(trainer, Xtr, ytr, Xbl, task):
         m, _ = trainer(Xtr, ytr, hw, task)
@@ -150,7 +151,8 @@ def _blend(data_path, hw, task):
     bl_l = oof_on_holdout(train_lgbm, X_tr, y_tr, X_bl, task)
     bl_x = oof_on_holdout(train_xgb, X_tr, y_tr, X_bl, task)
     bl_c = oof_on_holdout(train_catboost, X_tr, y_tr, X_bl, task)
-    meta = np.column_stack([bl_l, bl_x, bl_c])
+    bl_t = oof_on_holdout(train_tfdf, X_tr, y_tr, X_bl, task)
+    meta = np.column_stack([bl_l, bl_x, bl_c, bl_t])
 
     blender_cls = LogisticRegression if task == "classification" else Ridge
     blender = blender_cls(max_iter=1000).fit(meta, y_bl)
@@ -163,14 +165,15 @@ def _stack(data_path, hw, task):
     import numpy as np
     from sklearn.linear_model import LogisticRegression, Ridge
     from pipeline.validate import get_data
-    from pipeline.train import train_lgbm, train_xgb, train_catboost
+    from pipeline.train import train_lgbm, train_xgb, train_catboost, train_tfdf
     from pipeline.validate import cross_val_score
 
     X, y, _ = get_data(data_path)
     _, oof_l = train_lgbm(X, y, hw, task)
     _, oof_x = train_xgb(X, y, hw, task)
     _, oof_c = train_catboost(X, y, hw, task)
-    meta = np.column_stack([oof_l, oof_x, oof_c])
+    _, oof_t = train_tfdf(X, y, hw, task)
+    meta = np.column_stack([oof_l, oof_x, oof_c, oof_t])
 
     stacker_cls = LogisticRegression if task == "classification" else Ridge
     stacker = stacker_cls(max_iter=1000).fit(meta, y)

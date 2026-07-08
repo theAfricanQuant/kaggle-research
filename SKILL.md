@@ -46,7 +46,7 @@ uv run main.py --competition "<slug>" --name <slug> --iterations 50
 cd <slug>
 ```
 
-### 5. Run the autoresearch loop
+### 5. Run the competition loop
 
 ```bash
 uv run main.py --competition "<slug>" --iterations 50
