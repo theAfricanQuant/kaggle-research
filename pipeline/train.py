@@ -155,3 +155,25 @@ def train_tuned_catboost(X, y, hw, task, params, n_splits=5):
             oof[va] = model.predict(X[va])
         models.append(model)
     return models, oof
+
+
+def train_tfdf(X, y, hw, task, n_splits=5):
+    import tensorflow_decision_forests as tfdf
+    is_cls = task == "classification"
+    skf = get_splitter(task, n_splits=n_splits)
+    oof = np.zeros(len(X))
+    models = []
+    for tr, va in skf.split(X, y):
+        model = tfdf.keras.GradientBoostedTreesModel(
+            num_trees=500 if hw["gpu"] else 300,
+            growing_strategy="BEST_FIRST_GLOBAL",
+            max_depth=8,
+            min_examples=10,
+            categorical_algorithm="RANDOM",
+            random_seed=42,
+            verbose=0,
+        )
+        model.fit(X[tr], y[tr])
+        oof[va] = model.predict(X[va]).ravel()
+        models.append(model)
+    return models, oof

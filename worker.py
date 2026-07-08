@@ -20,6 +20,8 @@ def _run_hypothesis(hyp, data_path, hw, task, metric, optuna_trials):
         return _tuned_model(data_path, hw, task, "lgbm", metric, optuna_trials)
     elif hyp == "optuna_catboost":
         return _tuned_model(data_path, hw, task, "catboost", metric, optuna_trials)
+    elif hyp == "try_tfdf":
+        return _tfdf_baseline(data_path, hw, task)
     elif hyp == "depth1_xgb_ensemble":
         return _depth1_ensemble(data_path, hw, task)
     elif hyp == "average_lgbm_xgb_catboost":
@@ -80,6 +82,17 @@ def _tuned_model(data_path, hw, task, model_type, metric, optuna_trials):
     _, oof = trainer(X, y, hw, task, best_params)
     cv = cross_val_score(y, oof, task)
     return {"hypothesis": f"optuna_{model_type}", "cv_score": cv,
+            "model_path": None, "preds_path": None}
+
+
+def _tfdf_baseline(data_path, hw, task):
+    from pipeline.validate import get_data, cross_val_score
+    from pipeline.train import train_tfdf
+
+    X, y, _ = get_data(data_path)
+    _, oof = train_tfdf(X, y, hw, task)
+    cv = cross_val_score(y, oof, task)
+    return {"hypothesis": "try_tfdf", "cv_score": cv,
             "model_path": None, "preds_path": None}
 
 

@@ -116,10 +116,11 @@ The decision is based on your current CV score:
 | <0.75 | Optuna-tuned **XGBoost** | max_depth (3-12), min_child_weight, subsample, colsample, reg_alpha, reg_lambda, gamma, learning_rate |
 | 0.75-0.82 | Optuna-tuned **LightGBM** | num_leaves (15-127), min_child_samples, subsample, colsample, reg_alpha, reg_lambda, learning_rate |
 | 0.82-0.85 | Optuna-tuned **CatBoost** | depth (3-10), min_data_in_leaf, subsample, l2_leaf_reg, learning_rate |
-| 0.85-0.87 | Depth-1 XGBoost + LightGBM avg | Cheap ensemble to test if additive structure helps |
-| 0.87-0.88 | Average LGBM + XGB + CatBoost | Arithmetic mean of all 3; often beats any single one |
-| 0.88-0.90 | Blending (LogisticRegression meta-model) | Trains a blender on holdout predictions from all 3 |
-| ≥0.90 | Stacking (LogisticRegression on OOF features) | Full multi-layer stacking; highest potential, highest risk |
+| 0.85-0.87 | **TFDF** (TensorFlow Decision Forests) | Gradient Boosted Trees, BEST_FIRST_GLOBAL, max_depth=8 |
+| 0.87-0.88 | Depth-1 XGBoost + LightGBM avg | Cheap ensemble to test if additive structure helps |
+| 0.88-0.89 | Average LGBM + XGB + CatBoost | Arithmetic mean of all 3; often beats any single one |
+| 0.89-0.90 | Blending (LogisticRegression meta-model) | Trains a blender on holdout predictions from all 3 |
+| ≥0.90 | Stacking (LogisticRegression on OOF features) | Full multi-layer stacking |
 
 **For regression (R²):**
 
@@ -128,8 +129,9 @@ The decision is based on your current CV score:
 | <0.55 | Optuna-tuned XGBoost |
 | 0.55-0.65 | Optuna-tuned LightGBM |
 | 0.65-0.70 | Optuna-tuned CatBoost |
-| 0.70-0.75 | Depth-1 XGBoost + LightGBM avg |
-| 0.75-0.78 | Average LGBM + XGB + CatBoost |
+| 0.70-0.75 | TFDF (TensorFlow Decision Forests) |
+| 0.75-0.78 | Depth-1 XGBoost + LightGBM avg |
+| 0.78-0.80 | Average LGBM + XGB + CatBoost |
 | 0.78-0.82 | Blending (Ridge meta-model) |
 | ≥0.82 | Stacking |
 

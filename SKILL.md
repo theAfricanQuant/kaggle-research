@@ -78,8 +78,9 @@ Classification (ROC-AUC):
 | <0.75 | Optuna-tuned XGBoost |
 | 0.75-0.82 | Optuna-tuned LightGBM |
 | 0.82-0.85 | Optuna-tuned CatBoost |
-| 0.85-0.87 | Depth-1 ensemble |
-| 0.87-0.88 | Average all 3 models |
+| 0.85-0.87 | TFDF (TensorFlow Decision Forests) |
+| 0.87-0.88 | Depth-1 ensemble |
+| 0.88-0.89 | Average all 3 models |
 | 0.88-0.90 | Blend (meta-model) |
 | ≥0.90 | Stack ensemble |
 
@@ -89,8 +90,9 @@ Regression (R²):
 | <0.55 | Optuna-tuned XGBoost |
 | 0.55-0.65 | Optuna-tuned LightGBM |
 | 0.65-0.70 | Optuna-tuned CatBoost |
-| 0.70-0.75 | Depth-1 ensemble |
-| 0.75-0.78 | Average all 3 |
+| 0.70-0.75 | TFDF (TensorFlow Decision Forests) |
+| 0.75-0.78 | Depth-1 ensemble |
+| 0.78-0.80 | Average all 3 |
 | 0.78-0.82 | Blend (meta-model) |
 | ≥0.82 | Stack |
 

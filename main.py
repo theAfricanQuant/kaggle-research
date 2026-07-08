@@ -158,6 +158,7 @@ def route_next_hypothesis(state, task, optuna_trials):
         "optuna_xgb":         (0.55, 0.65) if not cls else (0.75, 0.82),
         "optuna_lgbm":        (0.65, 0.70) if not cls else (0.82, 0.85),
         "optuna_catboost":    (0.70, 0.75) if not cls else (0.85, 0.87),
+        "tfdf":               (0.75, 0.78) if not cls else (0.87, 0.88),
         "depth1_xgb":         None,
         "average":            None,
         "blend":              None,
@@ -182,9 +183,9 @@ def route_next_hypothesis(state, task, optuna_trials):
             if lo <= cv < hi:
                 return hyp
 
-    if cv >= (0.75 if not cls else 0.87):
+    if cv >= (0.78 if not cls else 0.88):
         return "depth1_xgb_ensemble"
-    elif cv >= (0.78 if not cls else 0.88):
+    elif cv >= (0.80 if not cls else 0.89):
         return "average_lgbm_xgb_catboost"
     elif cv >= (0.82 if not cls else 0.9):
         return "blend_with_meta_model"

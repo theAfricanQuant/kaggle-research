@@ -13,4 +13,5 @@ dependencies = [
     "catboost>=1.2",
     "psutil>=5.9",
     "optuna>=3.0",
+    "tensorflow-decision-forests>=1.5",
 ]
