@@ -1,6 +1,6 @@
 # kaggle-research
 
-An autonomous competition agent that runs Kaggle, Zindi, and DrivenData competitions for you. Implements the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit.
+An autonomous competition agent that runs Kaggle, Zindi, and DrivenData competitions for you. Implements a **research loop**: hypothesise → implement → CV verify → keep/revert → submit.
 
 Supports **classification** and **regression** — auto-detected from your data.
 
@@ -28,7 +28,7 @@ Then tell your agent:
 
 > "Use the kaggle-research skill on competition house-prices-advanced-regression-techniques"
 
-The agent reads the skill, copies template files into your folder, installs deps, scaffolds a project, and runs the full autoresearch loop — all autonomously. Just ensure `~/.kaggle/kaggle.json` exists.
+The agent reads the skill, copies template files into your folder, installs deps, scaffolds a project, and runs the full research loop — all autonomously. Just ensure `~/.kaggle/kaggle.json` exists.
 
 ### Manual (without an agent)
 
@@ -413,7 +413,7 @@ Create an empty folder, open your agent there, and say:
 
 > "Use the kaggle-research skill on competition house-prices-advanced-regression-techniques"
 
-The agent reads `SKILL.md`, copies the template files into your folder, installs deps, scaffolds a project, and runs the full autoresearch loop. It monitors `state/log.json` and reports back.
+The agent reads `SKILL.md`, copies the template files into your folder, installs deps, scaffolds a project, and runs the full research loop. It monitors `state/log.json` and reports back.
 
 The `SKILL.md` tells the agent exactly what to do step by step — no manual intervention needed beyond ensuring `~/.kaggle/kaggle.json` exists.
 

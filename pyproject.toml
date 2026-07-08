@@ -1,7 +1,7 @@
 [project]
 name = "kaggle-research"
 version = "0.1.0"
-description = "Autonomous Kaggle competition agent using the autoresearch pattern"
+description = "Autonomous Kaggle competition agent using a research loop pattern"
 requires-python = ">=3.9"
 dependencies = [
     "kagglehub>=0.3",

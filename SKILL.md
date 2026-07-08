@@ -2,11 +2,11 @@
 
 Autonomous Kaggle/Zindi competition agent. Designed to run inside AI coding agent harnesses (opencode, Claude Code, pi.dev, Codex).
 
-Uses the **autoresearch pattern**: hypothesise → implement → CV verify → keep/revert → submit.
+The loop: hypothesise → implement → CV verify → keep/revert → submit.
 
 ## When the user says
 
-"Run competition X", "compete for me on Kaggle", "autoresearch this competition", "iterate on my model", "find the best ensemble", "use the kaggle-research skill".
+"Run competition X", "compete for me on Kaggle", "iterate on my model", "find the best ensemble", "try different approaches in parallel", "use the kaggle-research skill".
 
 ## What you need to do
 
@@ -16,7 +16,7 @@ The user is in an empty project folder. Your job is to:
 2. Install dependencies
 3. Ensure the Kaggle API token is set up
 4. Scaffold a named project folder
-5. Run the autoresearch loop
+5. Run the competition loop
 6. Monitor progress and report back
 
 ## Step-by-step execution
