@@ -36,10 +36,26 @@ def get_data(data_path, sample_frac=1.0):
     if sample_frac < 1.0:
         df = df.sample(frac=sample_frac, random_state=42)
 
-    target_col = "target" if "target" in df.columns else [c for c in df.columns if c not in ("id",)][-1]
-    id_col = "id" if "id" in df.columns else None
+    # sample_submission.csv names the real id and target columns — prefer it
+    # over guessing, since competitions use anything from "Id" to "SalePrice".
+    sample = _load_csv(data_path, "sample_submission.csv")
+    id_col = next((c for c in df.columns if c.lower() == "id"), None)
+    target_col = None
+    if sample is not None and len(sample.columns) >= 2:
+        if sample.columns[0] in df.columns:
+            id_col = sample.columns[0]
+        if sample.columns[1] in df.columns:
+            target_col = sample.columns[1]
+    if target_col is None:
+        target_col = "target" if "target" in df.columns else [c for c in df.columns if c != id_col][-1]
 
     y = df[target_col].values
+    if detect_task(y) == "classification" and len(np.unique(y)) > 2:
+        raise ValueError(
+            f"Target '{target_col}' has {len(np.unique(y))} classes — this pipeline currently "
+            f"supports binary classification and regression only. Multiclass would need "
+            f"per-class OOF predictions throughout (train, ensemble, submit)."
+        )
     X = df.drop(columns=[c for c in [target_col, id_col] if c and c in df.columns])
 
     test_df = _load_csv(data_path, "test.csv")

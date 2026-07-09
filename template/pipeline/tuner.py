@@ -75,13 +75,18 @@ def _cat_objective(trial, X, y, task, hw, metric, folds, cat_cols):
         "iterations": 2000, "random_seed": 42, "verbose": 0,
         "task_type": "GPU" if hw["gpu"] else "CPU",
         "early_stopping_rounds": 50,
+        # Bernoulli supports 'subsample' on both CPU and GPU; the GPU default
+        # (bayesian) rejects it outright.
+        "bootstrap_type": "Bernoulli",
         "depth": trial.suggest_int("depth", 3, 10),
         "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
         "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-        "colsample_bylevel": trial.suggest_float("colsample_bylevel", 0.5, 1.0),
         "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 0, 10),
         "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3, log=True),
     }
+    if not hw["gpu"]:
+        # rsm/colsample_bylevel is CPU-only in CatBoost for most losses
+        params["colsample_bylevel"] = trial.suggest_float("colsample_bylevel", 0.5, 1.0)
 
     scores, best_iters = [], []
     for tr, va in folds:

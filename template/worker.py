@@ -3,6 +3,16 @@ import numpy as np
 
 log = logging.getLogger("kaggle-research")
 
+# The single source of truth for hypothesis names. main.py validates its
+# routing lists against this at startup — a mismatch between router and
+# worker names once made the whole loop silently no-op, so the check is
+# structural now, not a convention.
+KNOWN_HYPOTHESES = frozenset({
+    "lgbm_defaults", "fe_target_encoding", "fe_frequency", "fe_interactions",
+    "xgb_defaults", "catboost_defaults", "depth1_xgb_ensemble",
+    "optuna_xgb", "optuna_lgbm", "optuna_catboost",
+})
+
 
 def run_hypothesis(hyp, ctx):
     """Dispatches a hypothesis name to its implementation. ctx carries

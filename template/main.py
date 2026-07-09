@@ -18,6 +18,16 @@ PHASE1_HYPOTHESES = [
 PHASE2_HYPOTHESES = ["optuna_xgb", "optuna_lgbm", "optuna_catboost"]
 
 
+def _validate_hypothesis_names():
+    from worker import KNOWN_HYPOTHESES
+    unknown = set(PHASE1_HYPOTHESES + PHASE2_HYPOTHESES) - KNOWN_HYPOTHESES
+    if unknown:
+        raise RuntimeError(
+            f"Routing lists reference hypotheses the worker doesn't implement: {sorted(unknown)}. "
+            f"Register them in worker.py's handlers and KNOWN_HYPOTHESES."
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--competition", required=True)
@@ -58,6 +68,7 @@ def main():
     from state.log import load_state, save_state, LogEntry
     from state.experiments import save_experiment, load_experiment_library
 
+    _validate_hypothesis_names()
     log.info(f"Hardware: GPU={hw['gpu']} ({hw['gpu_name']}) "
              f"RAM={hw['ram_gb']}GB Cores={hw['cores']} Kaggle env={hw['on_kaggle']}")
 
@@ -138,7 +149,8 @@ def main():
 
         should_submit = iteration >= 10 and iteration % args.submission_interval == 0
         if should_submit:
-            _submit_current_best(state, STATE_DIR, args, test_ids, task, kaggle_submit, poll_for_score, save_submission_csv)
+            _submit_current_best(state, STATE_DIR, args, test_ids, task, data_path,
+                                 kaggle_submit, poll_for_score, save_submission_csv, higher_is_better)
 
         save_state(STATE_DIR / "log.json", state)
         log.info(f"Iterations: {len(state['iterations'])} | Best CV: {_fmt(state.get('latest_cv'))}")
@@ -153,14 +165,23 @@ def main():
         state["final_ensemble_weights"] = weights
         state["final_ensemble_cv"] = blended_score
 
-        if blended_score > (state.get("latest_cv") or -1e18) if higher_is_better else blended_score < (state.get("latest_cv") or 1e18):
+        prev_best = state.get("latest_cv")
+        ensemble_wins = (
+            prev_best is None
+            or (blended_score > prev_best if higher_is_better else blended_score < prev_best)
+        )
+        if ensemble_wins:
             state["latest_cv"] = blended_score
-            if X_test is not None and test_lib:
-                usable_weights = {n: w for n, w in weights.items() if n in test_lib}
-                if usable_weights:
-                    final_test_preds = apply_weights_to_test(usable_weights, test_lib)
-                    sub_path = save_submission_csv(test_ids, final_test_preds, path=str(STATE_DIR.parent / "submission_final.csv"))
-                    state["final_submission_path"] = sub_path
+        # Always write the final-ensemble submission when test predictions exist:
+        # hill climbing never scores below the best library member on OOF, and a
+        # short run may not have produced any submission CSV at all yet.
+        if test_lib:
+            usable_weights = {n: w for n, w in weights.items() if n in test_lib}
+            if usable_weights:
+                final_test_preds = apply_weights_to_test(usable_weights, test_lib)
+                sub_path = save_submission_csv(test_ids, final_test_preds, data_path=data_path,
+                                               path=str(STATE_DIR.parent / "submission_final.csv"))
+                state["final_submission_path"] = sub_path
 
     save_state(STATE_DIR / "log.json", state)
     log.info(f"Best CV: {_fmt(state.get('latest_cv'))} | Best LB: {state.get('last_lb')}")
@@ -244,22 +265,26 @@ def route_next_hypothesis(state, task, iteration):
     return None  # everything tried; final hill-climbing phase takes over
 
 
-def _submit_current_best(state, STATE_DIR, args, test_ids, task, kaggle_submit, poll_for_score, save_submission_csv):
+def _submit_current_best(state, STATE_DIR, args, test_ids, task, data_path,
+                         kaggle_submit, poll_for_score, save_submission_csv, higher_is_better):
     from state.experiments import load_experiment_library
     oof_lib, test_lib, scores = load_experiment_library(STATE_DIR)
     if not scores:
         return
-    best_name = max(scores, key=scores.get)
-    if best_name not in test_lib or test_ids is None:
+    # min() for rmse/logloss/mae — picking max there would submit the worst model
+    pick = max if higher_is_better else min
+    best_name = pick(scores, key=scores.get)
+    if best_name not in test_lib:
         log.info("Skipping submission — no test predictions available for the current best experiment")
         return
 
-    sub_path = save_submission_csv(test_ids, test_lib[best_name], path=str(STATE_DIR.parent / "submission.csv"))
+    sub_path = save_submission_csv(test_ids, test_lib[best_name], data_path=data_path,
+                                   path=str(STATE_DIR.parent / "submission.csv"))
     if args.data_path:
         log.info(f"Local-data competition — upload {sub_path} to the platform manually (no submission API)")
         return
 
-    sub = kaggle_submit(sub_path, f"iter {state['iterations'][-1]['iteration']}: {best_name[:60]}")
+    sub = kaggle_submit(sub_path, args.competition, f"iter {state['iterations'][-1]['iteration']}: {best_name[:60]}")
     lb_score = poll_for_score(sub, args.competition)
     log.info(f"Leaderboard: {lb_score} (CV: {_fmt(state.get('latest_cv'))})")
     state["iterations"][-1]["lb_score"] = lb_score

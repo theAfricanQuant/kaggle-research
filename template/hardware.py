@@ -1,22 +1,31 @@
-import os, platform
+import os, subprocess
+
+
+def _detect_nvidia_gpu():
+    """Queries nvidia-smi directly — torch isn't one of this project's
+    dependencies, so importing it would report 'no GPU' on every machine
+    regardless of actual hardware. CatBoost/XGBoost use CUDA without torch.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            name, mem_mb = result.stdout.strip().split("\n")[0].rsplit(",", 1)
+            return True, name.strip(), int(mem_mb.strip()) // 1024
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return False, None, 0
 
 
 def detect_hardware():
-    try:
-        import torch
-        gpu = torch.cuda.is_available()
-        gpu_name = torch.cuda.get_device_name(0) if gpu else None
-        gpu_mem = torch.cuda.get_device_properties(0).total_memory // (1024 ** 3) if gpu else 0
-    except (ImportError, ModuleNotFoundError):
-        gpu = False
-        gpu_name = None
-        gpu_mem = 0
+    gpu, gpu_name, gpu_mem = _detect_nvidia_gpu()
 
     try:
         import psutil
         ram = psutil.virtual_memory().total // (1024 ** 3)
     except (ImportError, ModuleNotFoundError):
-        import subprocess
         ram = int(subprocess.run(
             ["grep", "MemTotal", "/proc/meminfo"],
             capture_output=True, text=True

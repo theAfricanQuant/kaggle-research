@@ -71,6 +71,10 @@ def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_
         early_stopping_rounds=50,
     )
     base_params.update(params or {})
+    # Optuna's best_params only carries *suggested* keys, so the tuned refit
+    # must re-add the static bootstrap_type that makes 'subsample' legal on GPU
+    if "subsample" in base_params and "bootstrap_type" not in base_params:
+        base_params["bootstrap_type"] = "Bernoulli"
 
     oof = np.zeros(len(X))
     test_preds = np.zeros(len(X_test)) if X_test is not None else None

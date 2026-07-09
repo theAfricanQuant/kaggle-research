@@ -2,7 +2,7 @@
 
 An autonomous competition agent that runs Kaggle, Zindi, and DrivenData competitions for you. Implements a **research loop**: hypothesise → implement → CV verify → keep/revert → submit — grounded in the practices Kaggle Grandmasters actually use (frozen CV folds, noise-floor gating, out-of-fold target encoding, hill-climbing ensembles).
 
-Supports **classification** and **regression** — auto-detected from your data.
+Supports **binary classification** and **regression** — auto-detected from your data. (Multiclass isn't supported yet; the pipeline tells you explicitly rather than producing silently wrong predictions.)
 
 ## Quick start
 
@@ -81,12 +81,12 @@ For each iteration:
 4. **Gate** — keeps the new feature set / hyperparameters as the running baseline only if the improvement exceeds the noise floor; otherwise the experiment is logged but not adopted
 5. **Persist** — every experiment's OOF and test predictions are saved to `state/experiments/`, win or lose — a "worse" model can still add value to the final ensemble through diversity
 6. **Log** — hypothesis, CV score, and delta written to `state/log.json`
-7. **Submit** — every N iterations (default 5, starting at iteration 10), submits the current best experiment's test predictions
+7. **Submit** — every N iterations (default 5, starting at iteration 10), submits the current best experiment's test predictions via the official `kaggle` CLI (installed as a project dependency; authenticates from the same `~/.kaggle/kaggle.json`). Submission headers and ids come from the competition's `sample_submission.csv`, so files aren't rejected over column names
 8. **Track alignment** — after 5+ submissions, computes the Spearman rank correlation between CV and leaderboard scores; warns below 0.3
 
 ### Step 6: Final hill-climbing ensemble
 
-Once all hypotheses are exhausted, the agent runs **Caruana-style hill climbing** over every persisted experiment: starting from the single best model, it greedily adds (with replacement) whichever library member most improves the blended OOF score, stopping when nothing helps. This routinely beats any single model and beats the old fixed average/blend/stack ladder, because it searches the full experiment history instead of a hand-picked subset — and because it never re-fits or re-scores on data it's judging, it doesn't leak.
+Once all hypotheses are exhausted, the agent runs **Caruana-style hill climbing** over every persisted experiment: starting from the single best model, it greedily adds (with replacement) whichever library member most improves the blended OOF score, stopping when nothing helps. This routinely beats any single model and beats the old fixed average/blend/stack ladder, because it searches the full experiment history instead of a hand-picked subset — and because it never re-fits or re-scores on data it's judging, it doesn't leak. The blended test prediction is always written to `submission_final.csv` (using the competition's real submission headers), even on short runs that never hit the periodic-submission threshold.
 
 ---
 
@@ -301,7 +301,7 @@ Add it to `pipeline/validate.py`'s `cross_val_score` and it'll work everywhere t
 Yes — see [Using with Zindi.africa](#using-with-zindiafrica).
 
 **Can I add my own hypothesis?**
-Add a function in `worker.py`, register it in the `handlers` dict in `run_hypothesis`, and add its name to `PHASE1_HYPOTHESES`/`PHASE2_HYPOTHESES` in `main.py`.
+Add a function in `worker.py`, register it in both the `handlers` dict and `KNOWN_HYPOTHESES`, and add its name to `PHASE1_HYPOTHESES`/`PHASE2_HYPOTHESES` in `main.py`. A startup check validates the routing lists against the worker's registry, so a typo fails loudly at launch instead of silently skipping iterations.
 
 **My competition has repeated entities (users, molecules, patients) or is time-ordered — will the default folds leak?**
 The auto-picked splitter (`get_splitter` in `pipeline/validate.py`) only distinguishes classification from regression — it can't detect grouping or time order from the CSV alone. If your data has either property, modify `get_splitter` to use `GroupKFold` or `TimeSeriesSplit` before your first run; folds are frozen on first use, so this must happen before `state/folds.json` exists.
