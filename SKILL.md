@@ -1,20 +1,22 @@
+---
+name: kaggle-research
+description: Runs an autonomous research loop for Kaggle, Zindi, and DrivenData tabular competitions — hypothesise, train with cross-validation, keep or revert based on CV, submit to the leaderboard. Use this skill whenever the user wants to enter, compete in, or iterate on a Kaggle or Zindi competition, mentions a competition slug or URL, asks to "find the best model/ensemble" for tabular data, wants automated hyperparameter tuning or ensembling for a competition, or says things like "compete for me", "run this competition", or "use the kaggle-research skill". Also use it for general tabular ML competition strategy questions (CV design, target encoding, ensembling, submission strategy) even if the user hasn't named a specific competition yet.
+compatibility: Requires Python 3.11+, uv, and a Kaggle API token (~/.kaggle/kaggle.json) for Kaggle competitions. Zindi/DrivenData competitions require manually downloaded data.
+---
+
 # kaggle-research
 
 Autonomous Kaggle/Zindi competition agent. Designed to run inside AI coding agent harnesses (opencode, Claude Code, pi.dev, Codex).
 
 The loop: hypothesise → implement → CV verify → keep/revert → submit.
 
-## When the user says
-
-"Run competition X", "compete for me on Kaggle", "iterate on my model", "find the best ensemble", "try different approaches in parallel", "use the kaggle-research skill".
-
 ## What you need to do
 
 The user is in an empty project folder. Your job is to:
 
-1. Copy this skill's template files into the current working directory (the skill's base directory is listed at the top of this file — copy everything from there)
+1. Copy this skill's `template/` files into the current working directory
 2. Install dependencies
-3. Ensure the Kaggle API token is set up
+3. Ensure the Kaggle API token is set up (Kaggle competitions only)
 4. Scaffold a named project folder
 5. Run the competition loop
 6. Monitor progress and report back
@@ -23,7 +25,13 @@ The user is in an empty project folder. Your job is to:
 
 ### 1. Copy template files into the current directory
 
-The skill's base directory was shown when this skill was loaded. Copy everything from there (except `.git/`, `__pycache__/`, `bootstrap.sh`) into the current working directory. Use `cp -r`, `rsync`, or `shutil.copytree` — whichever you prefer.
+The skill's base directory was shown when this skill was loaded. Copy everything from `template/` (not the skill's own `SKILL.md`/`README.md`) into the current working directory:
+
+```bash
+cp -r <skill-dir>/template/. .
+```
+
+Never run the loop from inside the skill's own directory — if the skill was installed via a symlink (common with `npx skills add`), writing state there would mutate the shared, shared-across-projects source.
 
 ### 2. Install dependencies
 
@@ -31,13 +39,13 @@ The skill's base directory was shown when this skill was loaded. Copy everything
 uv sync
 ```
 
-### 3. Ensure Kaggle API token
+### 3. Ensure Kaggle API token (Kaggle competitions only)
 
 ```bash
 mkdir -p ~/.kaggle
 ```
 
-If `~/.kaggle/kaggle.json` doesn't exist, ask the user to download it from kaggle.com/account → Create API Token and place it there.
+If `~/.kaggle/kaggle.json` doesn't exist, ask the user to download it from kaggle.com/account → Create API Token and place it there. Zindi and DrivenData don't have this requirement — see "Using with Zindi" in README.md.
 
 ### 4. Scaffold a project folder
 
@@ -46,7 +54,7 @@ uv run main.py --competition "<slug>" --name <slug> --iterations 50
 cd <slug>
 ```
 
-### 5. Run the autoresearch loop
+### 5. Run the research loop
 
 ```bash
 uv run main.py --competition "<slug>" --iterations 50
@@ -72,45 +80,25 @@ Fast baselines, no tuning.
 
 **Phase 2 — Optuna tuning (iterations 11+, gated by CV)**
 
-Classification (ROC-AUC):
-| Score | Try |
-|---|---|
-| <0.75 | Optuna-tuned XGBoost |
-| 0.75-0.82 | Optuna-tuned LightGBM |
-| 0.82-0.85 | Optuna-tuned CatBoost |
-| 0.85-0.87 | TFDF (TensorFlow Decision Forests) |
-| 0.87-0.88 | Depth-1 ensemble |
-| 0.88-0.89 | Average all 3 models |
-| 0.88-0.90 | Blend (meta-model) |
-| ≥0.90 | Stack ensemble |
-
-Regression (R²):
-| Score | Try |
-|---|---|
-| <0.55 | Optuna-tuned XGBoost |
-| 0.55-0.65 | Optuna-tuned LightGBM |
-| 0.65-0.70 | Optuna-tuned CatBoost |
-| 0.70-0.75 | TFDF (TensorFlow Decision Forests) |
-| 0.75-0.78 | Depth-1 ensemble |
-| 0.78-0.80 | Average all 3 |
-| 0.78-0.82 | Blend (meta-model) |
-| ≥0.82 | Stack |
+Routing is relative to the marginal gain of the last few hypotheses, not fixed absolute CV thresholds — a CV of 0.75 is a winning score in some competitions and a broken baseline in others. See `main.py`'s `route_next_hypothesis` for the exact logic.
 
 ## File layout for reference
 
 | File | Role |
 |---|---|
-| `main.py` | Orchestrator — loop, routing, CV gating, submission |
-| `hardware.py` | GPU/RAM/core detection |
-| `worker.py` | Hypothesis dispatcher |
-| `pipeline/train.py` | Model trainers (default + tuned + depth-1) |
-| `pipeline/tuner.py` | Optuna 5-stage stepwise tuning |
-| `pipeline/validate.py` | CV scoring, task detection |
-| `pipeline/features.py` | Feature engineering |
-| `pipeline/ensemble.py` | Averaging helpers |
-| `pipeline/download.py` | Kaggle data download |
-| `pipeline/submit.py` | Submission + score polling |
-| `state/log.py` | Experiment logger |
+| `template/main.py` | Orchestrator — loop, routing, CV gating, submission |
+| `template/hardware.py` | GPU/RAM/core detection |
+| `template/worker.py` | Hypothesis dispatcher |
+| `template/pipeline/train.py` | Model trainers (default + tuned + depth-1) |
+| `template/pipeline/tuner.py` | Optuna 5-stage stepwise tuning |
+| `template/pipeline/validate.py` | CV scoring, task detection |
+| `template/pipeline/features.py` | Feature engineering |
+| `template/pipeline/ensemble.py` | Averaging + hill-climbing helpers |
+| `template/pipeline/download.py` | Kaggle data download |
+| `template/pipeline/submit.py` | Submission + score polling |
+| `template/state/log.py` | Experiment logger |
+
+Full methodology (CV design, target encoding, ensembling strategy, submission policy) is documented in `README.md` — read it before making changes to the loop.
 
 ## Extending
 

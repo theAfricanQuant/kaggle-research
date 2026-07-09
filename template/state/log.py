@@ -5,15 +5,14 @@ from datetime import datetime
 
 class LogEntry:
     def __init__(self, iteration, hypothesis, cv_before=None, cv_after=None,
-                 delta=None, model_path=None, preds_path=None,
+                 delta=None, experiment_path=None,
                  lb_score=None, timestamp=None):
         self.iteration = iteration
         self.hypothesis = hypothesis
         self.cv_before = cv_before
         self.cv_after = cv_after
         self.delta = delta
-        self.model_path = model_path
-        self.preds_path = preds_path
+        self.experiment_path = experiment_path
         self.lb_score = lb_score
         self.timestamp = timestamp or datetime.now().isoformat()
 
