@@ -27,7 +27,7 @@ fi
 echo "==> Creating $DEST from kaggle-research template..."
 
 mkdir -p "$DEST"
-rsync -a --exclude='.git' --exclude='.gitignore' --exclude='bootstrap.sh' "$REPO_DIR/" "$DEST/"
+rsync -a --exclude='.git' --exclude='.venv' --exclude='.pytest_cache' --exclude='__pycache__' --exclude='*.pyc' --exclude='state/log.json' --exclude='state/folds.json' --exclude='state/experiments/' --exclude='catboost_info/' --exclude='submission.csv' --exclude='submission_final.csv' "$REPO_DIR/" "$DEST/"
 
 cd "$DEST"
 

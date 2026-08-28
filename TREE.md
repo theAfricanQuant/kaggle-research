@@ -7,6 +7,7 @@ kaggle-research/
     ├── worker.py
     ├── bootstrap.sh
     ├── pyproject.toml
+    ├── uv.lock
     ├── .python-version
     ├── kaggle_wrapper.ipynb
     ├── pipeline/
@@ -18,6 +19,13 @@ kaggle-research/
     │   ├── features.py
     │   ├── ensemble.py
     │   └── submit.py
-    └── state/
-        ├── log.py
-        └── experiments.py
+    ├── state/
+    │   ├── log.py
+    │   ├── run.py
+    │   └── experiments.py
+    └── tests/
+        ├── test_state.py
+        ├── test_validate.py
+        ├── test_features_and_ensemble.py
+        ├── test_submission.py
+        └── test_router.py

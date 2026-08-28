@@ -2,7 +2,7 @@
 name = "kaggle-research"
 version = "0.1.0"
 description = "Autonomous Kaggle competition agent using a research loop pattern"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "kagglehub>=0.3",
     "kaggle>=1.6",
@@ -16,3 +16,12 @@ dependencies = [
     "psutil>=5.9",
     "optuna>=3.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

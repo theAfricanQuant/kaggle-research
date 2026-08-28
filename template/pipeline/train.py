@@ -15,7 +15,7 @@ def train_lgbm(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_esti
     )
     base_params.update(params or {})
 
-    oof = np.zeros(len(X))
+    oof = np.full(len(X), np.nan)
     test_preds = np.zeros(len(X_test)) if X_test is not None else None
     best_iters = []
     for tr, va in folds:
@@ -43,7 +43,7 @@ def train_xgb(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estim
     if "n_estimators" not in (params or {}) and n_estimators:
         base_params["n_estimators"] = n_estimators
 
-    oof = np.zeros(len(X))
+    oof = np.full(len(X), np.nan)
     test_preds = np.zeros(len(X_test)) if X_test is not None else None
     best_iters = []
     for tr, va in folds:
@@ -76,7 +76,7 @@ def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_
     if "subsample" in base_params and "bootstrap_type" not in base_params:
         base_params["bootstrap_type"] = "Bernoulli"
 
-    oof = np.zeros(len(X))
+    oof = np.full(len(X), np.nan)
     test_preds = np.zeros(len(X_test)) if X_test is not None else None
     best_iters = []
     for tr, va in folds:

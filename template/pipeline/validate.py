@@ -2,20 +2,34 @@ import os, json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from sklearn.model_selection import StratifiedKFold, KFold, GroupKFold
+from sklearn.model_selection import StratifiedKFold, KFold, GroupKFold, TimeSeriesSplit
 from sklearn.metrics import roc_auc_score, r2_score, log_loss, mean_squared_error, mean_absolute_error, accuracy_score, f1_score
 
 
 def detect_task(y):
-    if np.issubdtype(y.dtype, np.integer) and len(np.unique(y)) <= 20:
+    y = np.asarray(y)
+    unique = np.unique(y)
+    if y.dtype == bool or y.dtype == object or np.issubdtype(y.dtype, np.str_):
         return "classification"
-    if np.issubdtype(y.dtype, np.floating):
-        if len(np.unique(y)) <= 10:
+    if len(unique) <= 2:
+        return "classification"
+    if np.issubdtype(y.dtype, np.integer):
+        class_ratio = len(unique) / max(len(y), 1)
+        if len(unique) <= 20 and class_ratio <= 0.2:
             return "classification"
-        return "regression"
-    if y.dtype == bool or y.dtype == object:
-        return "classification"
     return "regression"
+
+
+def validate_target(task, y):
+    """Reject unsupported multiclass targets after any explicit task override."""
+    n_classes = len(np.unique(y))
+    if task == "classification" and n_classes != 2:
+        raise ValueError(
+            f"Classification target has {n_classes} classes; this pipeline currently "
+            "supports binary classification only. Use --task regression for a continuous "
+            "numeric target."
+        )
+    return task
 
 
 def _load_csv(data_path, name):
@@ -23,10 +37,10 @@ def _load_csv(data_path, name):
     return pd.read_csv(path) if os.path.exists(path) else None
 
 
-def get_data(data_path, sample_frac=1.0):
+def get_data(data_path, sample_frac=1.0, group_col=None, time_col=None):
     """Loads train (and test, if present) preserving categorical columns.
 
-    Returns (X_train_df, y, X_test_df_or_None, test_ids_or_None, cat_cols).
+    Returns (X_train, y, X_test, test_ids, categorical_columns, split_metadata).
     Categoricals are kept as pandas 'category' dtype so CatBoost/LightGBM can
     use them natively instead of every column being coerced to numeric.
     """
@@ -49,20 +63,21 @@ def get_data(data_path, sample_frac=1.0):
     if target_col is None:
         target_col = "target" if "target" in df.columns else [c for c in df.columns if c != id_col][-1]
 
+    for split_col, label in ((group_col, "group"), (time_col, "time")):
+        if split_col and split_col not in df.columns:
+            raise KeyError(f"Configured {label} column '{split_col}' is missing from train.csv")
+    if time_col:
+        df = df.sort_values(time_col, kind="stable").reset_index(drop=True)
     y = df[target_col].values
-    if detect_task(y) == "classification" and len(np.unique(y)) > 2:
-        raise ValueError(
-            f"Target '{target_col}' has {len(np.unique(y))} classes — this pipeline currently "
-            f"supports binary classification and regression only. Multiclass would need "
-            f"per-class OOF predictions throughout (train, ensemble, submit)."
-        )
-    X = df.drop(columns=[c for c in [target_col, id_col] if c and c in df.columns])
+    groups = df[group_col].to_numpy() if group_col else None
+    times = df[time_col].to_numpy() if time_col else None
+    X = df.drop(columns=[c for c in [target_col, id_col, group_col, time_col] if c and c in df.columns])
 
     test_df = _load_csv(data_path, "test.csv")
     test_ids, X_test = None, None
     if test_df is not None:
         test_ids = test_df[id_col].values if id_col and id_col in test_df.columns else np.arange(len(test_df))
-        X_test = test_df.drop(columns=[c for c in [id_col] if c and c in test_df.columns])
+        X_test = test_df.drop(columns=[c for c in [id_col, group_col, time_col] if c and c in test_df.columns])
         X_test = X_test.reindex(columns=X.columns)
 
     cat_cols = []
@@ -71,17 +86,35 @@ def get_data(data_path, sample_frac=1.0):
         if is_textlike or not pd.api.types.is_numeric_dtype(X[col]):
             X[col] = X[col].astype("category")
             if X_test is not None:
-                X_test[col] = X_test[col].astype(pd.CategoricalDtype(categories=X[col].cat.categories))
+                known_categories = X[col].cat.categories
+                X_test[col] = X_test[col].where(X_test[col].isin(known_categories)).astype(pd.CategoricalDtype(categories=known_categories))
             cat_cols.append(col)
         else:
             X[col] = X[col].fillna(X[col].median())
             if X_test is not None:
                 X_test[col] = X_test[col].fillna(X[col].median())
 
-    return X, y, X_test, test_ids, cat_cols
+    return X, y, X_test, test_ids, cat_cols, {"groups": groups, "times": times}
 
 
-def get_splitter(task, groups=None, n_splits=5, random_state=42):
+def resolve_cv_strategy(task, strategy="auto", groups=None, times=None):
+    valid = {"auto", "stratified", "kfold", "group", "time"}
+    if strategy not in valid:
+        raise ValueError(f"Unknown CV strategy '{strategy}'. Choose from {sorted(valid)}")
+    if strategy == "auto":
+        if times is not None:
+            return "time"
+        if groups is not None:
+            return "group"
+        return "stratified" if task == "classification" else "kfold"
+    if strategy == "group" and groups is None:
+        raise ValueError("Group CV requires --group-col")
+    if strategy == "time" and times is None:
+        raise ValueError("Time CV requires --time-col")
+    return strategy
+
+
+def get_splitter(task, groups=None, times=None, strategy="auto", n_splits=5, random_state=42):
     """Picks the CV scheme appropriate to the data structure.
 
     Grouped data (repeated entities) uses GroupKFold so no entity leaks
@@ -91,31 +124,49 @@ def get_splitter(task, groups=None, n_splits=5, random_state=42):
     pass --group-col if your competition has repeated entities, and treat
     a temporal target column as a signal to switch splitters manually.
     """
-    if groups is not None:
+    strategy = resolve_cv_strategy(task, strategy, groups, times)
+    if strategy == "group":
         return GroupKFold(n_splits=n_splits)
-    if task == "classification":
+    if strategy == "time":
+        return TimeSeriesSplit(n_splits=n_splits)
+    if strategy == "stratified":
         return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     return KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
 
-def load_or_create_folds(state_dir, X, y, task, groups=None, n_splits=5, random_state=42):
+def load_or_create_folds(state_dir, X, y, task, groups=None, times=None, strategy="auto",
+                         n_splits=5, random_state=42, fingerprint=None):
     """Freezes fold indices to disk on first call; every later hypothesis
     reuses the exact same folds so their OOF scores are comparable and
     stackable. Re-running with different folds each iteration silently
     invalidates every ensembling step downstream.
     """
     folds_path = Path(state_dir) / "folds.json"
+    resolved = resolve_cv_strategy(task, strategy, groups, times)
     if folds_path.exists():
         with open(folds_path) as f:
-            raw = json.load(f)
-        return [(np.array(tr), np.array(va)) for tr, va in raw]
+            payload = json.load(f)
+        if not isinstance(payload, dict) or "folds" not in payload:
+            raise RuntimeError("Legacy folds.json is unsafe to reuse; move or delete state/ and rerun")
+        if fingerprint and payload.get("fingerprint") != fingerprint:
+            raise RuntimeError("Frozen folds do not match the current data/CV configuration")
+        if payload.get("n_rows") != len(X):
+            raise RuntimeError("Frozen folds have a different row count from the current training data")
+        return [(np.array(tr), np.array(va)) for tr, va in payload["folds"]]
 
-    splitter = get_splitter(task, groups=groups, n_splits=n_splits, random_state=random_state)
-    split_args = (X, y, groups) if groups is not None else (X, y)
-    folds = [(tr.tolist(), va.tolist()) for tr, va in splitter.split(*split_args)]
-    folds_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(folds_path, "w") as f:
-        json.dump(folds, f)
+    splitter = get_splitter(task, groups, times, resolved, n_splits, random_state)
+    if resolved == "time":
+        order = np.argsort(np.asarray(times), kind="stable")
+        fold_pairs = [(order[tr], order[va]) for tr, va in splitter.split(order)]
+    elif resolved == "group":
+        fold_pairs = list(splitter.split(X, y, groups))
+    else:
+        fold_pairs = list(splitter.split(X, y))
+
+    folds = [(tr.tolist(), va.tolist()) for tr, va in fold_pairs]
+    payload = {"fingerprint": fingerprint, "strategy": resolved, "n_rows": len(X), "folds": folds}
+    from state.log import save_state
+    save_state(folds_path, payload)
     return [(np.array(tr), np.array(va)) for tr, va in folds]
 
 
@@ -148,8 +199,23 @@ def adversarial_validation_auc(X_train, X_test, n_splits=5):
     return roc_auc_score(ya, oof)
 
 
+def validate_metric(task, metric):
+    allowed = {"classification": {"roc_auc", "logloss", "accuracy", "f1"},
+               "regression": {"rmse", "mae", "r2"}}
+    if task not in allowed:
+        raise ValueError(f"Unknown task '{task}'")
+    if metric not in allowed[task]:
+        raise ValueError(f"Metric '{metric}' is incompatible with {task}; choose {sorted(allowed[task])}")
+    return metric
+
 def cross_val_score(y_true, y_pred, task, metric=None):
-    metric = metric or ("roc_auc" if task == "classification" else "r2")
+    metric = validate_metric(task, metric or ("roc_auc" if task == "classification" else "r2"))
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    valid = np.isfinite(y_pred)
+    if not valid.any():
+        raise ValueError("No finite out-of-fold predictions are available for scoring")
+    y_true, y_pred = y_true[valid], y_pred[valid]
     if metric == "roc_auc":
         return roc_auc_score(y_true, y_pred)
     if metric == "logloss":
@@ -164,7 +230,7 @@ def cross_val_score(y_true, y_pred, task, metric=None):
         return accuracy_score(y_true, (y_pred > 0.5).astype(int))
     if metric == "f1":
         return f1_score(y_true, (y_pred > 0.5).astype(int))
-    return roc_auc_score(y_true, y_pred) if task == "classification" else r2_score(y_true, y_pred)
+    raise AssertionError(f"Unhandled metric: {metric}")
 
 
 def metric_higher_is_better(metric):

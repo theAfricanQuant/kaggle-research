@@ -69,6 +69,54 @@ def hill_climb(y_true, oof_library, task, metric, max_rounds=100, tol=1e-5):
     return weights, current_blend, history
 
 
+def cross_fitted_hill_climb(y_true, oof_library, task, metric, n_splits=5, random_state=42):
+    """Selects ensemble members inside meta-folds and scores on held-out rows.
+
+    The final weights are learned from all finite OOF rows for test inference,
+    while returned OOF predictions are cross-fitted and therefore suitable for
+    an honest estimate of ensemble-selection performance.
+    """
+    from pipeline.validate import get_splitter
+
+    names = list(oof_library)
+    if len(names) < 2:
+        raise ValueError("Cross-fitted ensemble selection requires at least two experiments")
+
+    predictions = {name: np.asarray(oof_library[name]) for name in names}
+    finite = np.logical_and.reduce([np.isfinite(predictions[name]) for name in names])
+    valid_indices = np.flatnonzero(finite)
+    if len(valid_indices) < 4:
+        raise ValueError("Too few finite OOF rows for cross-fitted ensemble selection")
+
+    y_true = np.asarray(y_true)
+    y_valid = y_true[valid_indices]
+    max_splits = len(valid_indices)
+    if task == "classification":
+        _, counts = np.unique(y_valid, return_counts=True)
+        max_splits = min(max_splits, int(counts.min()))
+    n_splits = min(n_splits, max_splits)
+    if n_splits < 2:
+        raise ValueError("Too few rows per class for cross-fitted ensemble selection")
+
+    strategy = "stratified" if task == "classification" else "kfold"
+    splitter = get_splitter(task, strategy=strategy, n_splits=n_splits, random_state=random_state)
+    positions = np.arange(len(valid_indices))
+    split_iter = splitter.split(positions, y_valid)
+    cross_fitted = np.full(len(y_true), np.nan)
+
+    for train_pos, valid_pos in split_iter:
+        train_idx = valid_indices[train_pos]
+        holdout_idx = valid_indices[valid_pos]
+        train_library = {name: predictions[name][train_idx] for name in names}
+        weights, _, _ = hill_climb(y_true[train_idx], train_library, task, metric)
+        holdout_library = {name: predictions[name][holdout_idx] for name in names}
+        cross_fitted[holdout_idx] = apply_weights_to_test(weights, holdout_library)
+
+    full_library = {name: predictions[name][valid_indices] for name in names}
+    final_weights, _, history = hill_climb(y_valid, full_library, task, metric)
+    return final_weights, cross_fitted, history
+
+
 def apply_weights_to_test(weights, test_pred_library):
     """Applies hill-climbed weights (member -> selection count) to the
     corresponding test-set prediction library to produce the final

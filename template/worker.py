@@ -92,7 +92,7 @@ def _with_feature_engineering(hyp, ctx):
     oof, test_preds, _ = train_lgbm(X_fe, ctx["y"], X_test_fe, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": hyp, "cv_score": cv, "oof": oof, "test_preds": test_preds,
-            "candidate_features": (X_fe, X_test_fe)}
+            "candidate_features": (X_fe, X_test_fe), "transform": transform}
 
 
 def _tuned_model(hyp, ctx):
@@ -112,7 +112,8 @@ def _tuned_model(hyp, ctx):
     oof, test_preds, _ = train_tuned(model_type, X, ctx["y"], X_test, ctx["hw"], ctx["task"],
                                       ctx["folds"], ctx["cat_cols"], best_params, best_iter)
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
-    return {"hypothesis": hyp, "cv_score": cv, "oof": oof, "test_preds": test_preds}
+    return {"hypothesis": hyp, "cv_score": cv, "oof": oof, "test_preds": test_preds,
+            "best_params": best_params, "best_iteration": best_iter}
 
 
 def _depth1_ensemble(hyp, ctx):

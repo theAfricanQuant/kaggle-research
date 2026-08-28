@@ -5,11 +5,9 @@ __pycache__/
 *.pyc
 # uv / venv
 .venv/
-uv.lock
-# Runtime state from actually running a competition
-template/state/log.json
-template/state/folds.json
-template/state/experiments/
-template/catboost_info/
-template/submission.csv
-template/submission_final.csv
+state/log.json
+state/folds.json
+state/experiments/
+catboost_info/
+submission.csv
+submission_final.csv

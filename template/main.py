@@ -1,4 +1,4 @@
-import sys, argparse, logging
+import sys, argparse, logging, hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +42,18 @@ def main():
     parser.add_argument("--iterations", type=int, default=50)
     parser.add_argument("--submission-interval", type=int, default=5)
     parser.add_argument("--task", choices=["classification", "regression", "auto"], default="auto")
+    parser.add_argument("--cv-strategy", choices=["auto", "stratified", "kfold", "group", "time"],
+                        default="auto", help="Validation splitter; auto uses time/group columns when supplied.")
+    parser.add_argument("--group-col", default=None,
+                        help="Entity/group column excluded from features and kept within one fold.")
+    parser.add_argument("--time-col", default=None,
+                        help="Temporal ordering column excluded from features; enables forward-chaining CV.")
+    parser.add_argument("--n-splits", type=int, default=5)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--submit", action="store_true",
+                        help="Authorize Kaggle leaderboard submissions. Without this flag only CSVs are written.")
+    parser.add_argument("--max-submissions", type=int, default=3,
+                        help="Maximum Kaggle submissions this run may make when --submit is present.")
     parser.add_argument("--metric", default="auto",
                         help=f"Optimisation metric. Auto: roc_auc (cls) or r2 (reg). "
                              f"Classification: {METRICS_CLS}. Regression: {METRICS_REG}.")
@@ -50,6 +62,16 @@ def main():
     parser.add_argument("--noise-seeds", type=int, default=3,
                         help="Seeds used to estimate the CV noise floor before the loop starts.")
     args = parser.parse_args()
+    if args.n_splits < 2:
+        parser.error("--n-splits must be at least 2")
+    if args.iterations < 0:
+        parser.error("--iterations cannot be negative")
+    if args.optuna_trials < 1:
+        parser.error("--optuna-trials must be positive")
+    if args.submit and args.submission_interval < 1:
+        parser.error("--submission-interval must be positive when --submit is used")
+    if args.submit and args.max_submissions < 1:
+        parser.error("--max-submissions must be positive when --submit is used")
 
     HERE = Path(__file__).parent.resolve()
 
@@ -62,50 +84,84 @@ def main():
 
     from worker import run_hypothesis
     from pipeline.download import fetch_data
-    from pipeline.validate import get_data, detect_task, load_or_create_folds, adversarial_validation_auc, cross_val_score, metric_higher_is_better
+    from pipeline.validate import get_data, detect_task, load_or_create_folds, adversarial_validation_auc, cross_val_score, metric_higher_is_better, resolve_cv_strategy, validate_metric, validate_target
     from pipeline.submit import kaggle_submit, poll_for_score, save_submission_csv
-    from pipeline.ensemble import hill_climb, apply_weights_to_test
+    from pipeline.ensemble import cross_fitted_hill_climb, apply_weights_to_test
     from state.log import load_state, save_state, LogEntry
     from state.experiments import save_experiment, load_experiment_library
+    from state.run import fingerprint_data, initialize_or_validate_state
 
     _validate_hypothesis_names()
     log.info(f"Hardware: GPU={hw['gpu']} ({hw['gpu_name']}) "
              f"RAM={hw['ram_gb']}GB Cores={hw['cores']} Kaggle env={hw['on_kaggle']}")
 
     data_path = fetch_data(args.competition, local_path=args.data_path)
-    X, y, X_test, test_ids, cat_cols = get_data(data_path)
+    X, y, X_test, test_ids, cat_cols, split_metadata = get_data(
+        data_path, group_col=args.group_col, time_col=args.time_col)
 
     task = detect_task(y) if args.task == "auto" else args.task
+    validate_target(task, y)
     log.info(f"Task: {task}" + (" (auto-detected)" if args.task == "auto" else ""))
 
-    metric = args.metric if args.metric != "auto" else ("roc_auc" if task == "classification" else "r2")
+    metric = validate_metric(task, args.metric if args.metric != "auto" else ("roc_auc" if task == "classification" else "r2"))
     log.info(f"Optimising for: {metric}")
 
-    folds = load_or_create_folds(STATE_DIR, X, y, task)
-    log.info(f"Using {len(folds)} frozen CV folds (state/folds.json)")
+    cv_strategy = resolve_cv_strategy(task, args.cv_strategy,
+                                      split_metadata["groups"], split_metadata["times"])
+    data_fingerprint = fingerprint_data(data_path)
+    run_config = {
+        "competition": args.competition,
+        "data_fingerprint": data_fingerprint,
+        "task": task,
+        "metric": metric,
+        "cv_strategy": cv_strategy,
+        "group_col": args.group_col,
+        "time_col": args.time_col,
+        "n_splits": args.n_splits,
+        "seed": args.seed,
+        "optuna_trials": args.optuna_trials,
+        "noise_seeds": args.noise_seeds,
+    }
+    state = initialize_or_validate_state(load_state(STATE_DIR / "log.json"), run_config)
+    folds = load_or_create_folds(
+        STATE_DIR, X, y, task,
+        groups=split_metadata["groups"], times=split_metadata["times"],
+        strategy=cv_strategy, n_splits=args.n_splits, random_state=args.seed,
+        fingerprint=state["run_fingerprint"],
+    )
+    log.info(f"Using {len(folds)} frozen {cv_strategy} CV folds (state/folds.json)")
 
-    adv_auc = adversarial_validation_auc(X, X_test)
+    if "adversarial_validation_auc" in state:
+        adv_auc = state["adversarial_validation_auc"]
+    else:
+        adv_auc = adversarial_validation_auc(X, X_test)
+        state["adversarial_validation_auc"] = adv_auc
     if adv_auc is not None:
         level = log.warning if adv_auc > 0.7 else log.info
         level(f"Adversarial validation AUC (train vs test): {adv_auc:.3f}"
               + (" — train/test distributions differ; CV may not reflect the leaderboard" if adv_auc > 0.7 else ""))
 
-    state = load_state(STATE_DIR / "log.json")
-    state.setdefault("competition", args.competition)
-    state.setdefault("task", task)
-    state.setdefault("metric", metric)
-    state.setdefault("iterations", [])
-    state.setdefault("tried_hypotheses", [])
-    save_state(STATE_DIR / "log.json", state)
-
-    noise_floor = _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols, args.noise_seeds)
+    if "noise_floor" in state:
+        noise_floor = state["noise_floor"]
+    else:
+        noise_floor = _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols,
+                                            args.noise_seeds, cv_strategy)
+        state["noise_floor"] = noise_floor
     log.info(f"CV noise floor (±1 std across {args.noise_seeds} seeds): {noise_floor:.4f} — "
              f"improvements smaller than this are treated as noise, not progress")
 
     feature_state = {"X": X, "X_test": X_test}
-    higher_is_better = metric_higher_is_better(metric)
+    accepted = state["accepted_feature_transforms"]
+    if accepted:
+        from pipeline.features import engineer_features
+        accepted_X, accepted_X_test = engineer_features(X, y, X_test, cat_cols, accepted, folds)
+        feature_state = {"X": accepted_X, "X_test": accepted_X_test}
+        log.info(f"Reconstructed accepted feature state: {accepted}")
 
-    for iteration in range(1, args.iterations + 1):
+    higher_is_better = metric_higher_is_better(metric)
+    save_state(STATE_DIR / "log.json", state)
+
+    for iteration in range(state["next_iteration"], args.iterations + 1):
         log.info(f"=== Iteration {iteration}/{args.iterations} ===")
 
         hypothesis = route_next_hypothesis(state, task, iteration)
@@ -113,11 +169,16 @@ def main():
             log.info("No untried hypotheses with expected marginal gain remain — stopping early")
             break
         log.info(f"Hypothesis: {hypothesis}")
+        state["active_iteration"] = {"iteration": iteration, "hypothesis": hypothesis}
+        save_state(STATE_DIR / "log.json", state)
+
 
         ctx = dict(y=y, hw=hw, task=task, metric=metric, cat_cols=cat_cols, folds=folds,
                    feature_state=feature_state, optuna_trials=args.optuna_trials)
         result = run_hypothesis(hypothesis, ctx)
         state["tried_hypotheses"].append(hypothesis)
+        state["next_iteration"] = iteration + 1
+        state.pop("active_iteration", None)
 
         if result is None:
             save_state(STATE_DIR / "log.json", state)
@@ -125,7 +186,22 @@ def main():
 
         cv_before = state.get("latest_cv")
         delta = result["cv_score"] - (cv_before if cv_before is not None else 0)
-        exp_path = save_experiment(STATE_DIR, f"{hypothesis}_{iteration}", result["oof"], result["test_preds"], result["cv_score"])
+        experiment_metadata = {
+            "iteration": iteration,
+            "hypothesis": hypothesis,
+            "task": task,
+            "metric": metric,
+            "cv_score": result["cv_score"],
+            "run_fingerprint": state["run_fingerprint"],
+            "best_params": result.get("best_params"),
+            "best_iteration": result.get("best_iteration"),
+            "proposed_transform": result.get("transform"),
+            "accepted_feature_transforms": list(state["accepted_feature_transforms"]),
+        }
+        exp_path = save_experiment(
+            STATE_DIR, f"{iteration:03d}_{hypothesis}", result["oof"], result["test_preds"],
+            result["cv_score"], metadata=experiment_metadata,
+        )
         entry = LogEntry(
             iteration=iteration, hypothesis=hypothesis,
             cv_before=cv_before, cv_after=result["cv_score"], delta=delta,
@@ -142,23 +218,31 @@ def main():
             state["latest_cv"] = result["cv_score"]
             if "candidate_features" in result:
                 feature_state["X"], feature_state["X_test"] = result["candidate_features"]
+                transform = result.get("transform")
+                if transform and transform not in state["accepted_feature_transforms"]:
+                    state["accepted_feature_transforms"].append(transform)
                 log.info(f"  Feature set from '{hypothesis}' kept — later hypotheses build on it")
         else:
             log.info(f"❌ Within noise floor (Δ{delta:+.4f} < {noise_floor:.4f}) — not adopted as new best, "
                      f"but experiment saved for ensembling")
 
-        should_submit = iteration >= 10 and iteration % args.submission_interval == 0
+        save_state(STATE_DIR / "log.json", state)
+        should_submit = (
+            args.submit
+            and iteration >= 10
+            and iteration % args.submission_interval == 0
+            and len(state["submissions"]) < args.max_submissions
+        )
         if should_submit:
             _submit_current_best(state, STATE_DIR, args, test_ids, task, data_path,
                                  kaggle_submit, poll_for_score, save_submission_csv, higher_is_better)
-
         save_state(STATE_DIR / "log.json", state)
         log.info(f"Iterations: {len(state['iterations'])} | Best CV: {_fmt(state.get('latest_cv'))}")
 
     log.info("=== Research loop complete — running final hill-climbing ensemble ===")
     oof_lib, test_lib, _ = load_experiment_library(STATE_DIR)
     if len(oof_lib) >= 2:
-        weights, blended_oof, history = hill_climb(y, oof_lib, task, metric)
+        weights, blended_oof, history = cross_fitted_hill_climb(y, oof_lib, task, metric)
         blended_score = cross_val_score(y, blended_oof, task, metric)
         log.info(f"Hill-climbed ensemble ({len(history)} rounds): CV {blended_score:.4f}")
         log.info(f"Selection weights: {weights}")
@@ -216,7 +300,7 @@ def _scaffold_project(args, HERE):
              f"  uv run main.py --competition \"{args.competition}\" --iterations {args.iterations}")
 
 
-def _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols, n_seeds):
+def _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols, n_seeds, cv_strategy):
     """Trains the cheapest baseline (LightGBM defaults) with several
     different fold-shuffle seeds to measure how much CV moves from
     randomness alone. Hypotheses must beat this to be considered real
@@ -232,7 +316,11 @@ def _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols, n_see
 
     scores = []
     for seed in range(n_seeds):
-        seeded_folds = [(tr, va) for tr, va in get_splitter(task, n_splits=len(folds), random_state=seed).split(X, y)]
+        if cv_strategy in ("group", "time"):
+            seeded_folds = folds
+        else:
+            splitter = get_splitter(task, strategy=cv_strategy, n_splits=len(folds), random_state=seed)
+            seeded_folds = [(tr, va) for tr, va in splitter.split(X, y)]
         oof, _, _ = train_lgbm(X, y, None, hw, task, seeded_folds, cat_cols)
         scores.append(cross_val_score(y, oof, task, metric))
     import numpy as np
@@ -278,6 +366,11 @@ def _submit_current_best(state, STATE_DIR, args, test_ids, task, data_path,
         log.info("Skipping submission — no test predictions available for the current best experiment")
         return
 
+    submission_hash = hashlib.sha256(test_lib[best_name].tobytes()).hexdigest()
+    if submission_hash in state["submitted_hashes"]:
+        log.info(f"Skipping duplicate submission for experiment {best_name}")
+        return
+
     sub_path = save_submission_csv(test_ids, test_lib[best_name], data_path=data_path,
                                    path=str(STATE_DIR.parent / "submission.csv"))
     if args.data_path:
@@ -285,9 +378,19 @@ def _submit_current_best(state, STATE_DIR, args, test_ids, task, data_path,
         return
 
     sub = kaggle_submit(sub_path, args.competition, f"iter {state['iterations'][-1]['iteration']}: {best_name[:60]}")
+    if sub is None:
+        return
     lb_score = poll_for_score(sub, args.competition)
-    log.info(f"Leaderboard: {lb_score} (CV: {_fmt(state.get('latest_cv'))})")
-    state["iterations"][-1]["lb_score"] = lb_score
+    submitted_at = datetime.now().isoformat()
+    state["submitted_hashes"].append(submission_hash)
+    state["submissions"].append({
+        "experiment": best_name,
+        "prediction_hash": submission_hash,
+        "cv_score": scores[best_name],
+        "lb_score": lb_score,
+        "submitted_at": submitted_at,
+    })
+    log.info(f"Leaderboard: {lb_score} (submitted CV: {_fmt(scores[best_name])})")
     state["last_lb"] = lb_score
     check_cv_lb_alignment(state)
 
@@ -297,7 +400,7 @@ def _fmt(v):
 
 
 def check_cv_lb_alignment(state):
-    scores = [(it["cv_after"], it.get("lb_score")) for it in state["iterations"] if it.get("lb_score")]
+    scores = [(sub["cv_score"], sub.get("lb_score")) for sub in state.get("submissions", []) if sub.get("lb_score") is not None]
     if len(scores) < 5:
         log.info(f"CV-LB alignment needs 5+ submissions to be meaningful ({len(scores)} so far)")
         return

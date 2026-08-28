@@ -81,12 +81,12 @@ For each iteration:
 4. **Gate** — keeps the new feature set / hyperparameters as the running baseline only if the improvement exceeds the noise floor; otherwise the experiment is logged but not adopted
 5. **Persist** — every experiment's OOF and test predictions are saved to `state/experiments/`, win or lose — a "worse" model can still add value to the final ensemble through diversity
 6. **Log** — hypothesis, CV score, and delta written to `state/log.json`
-7. **Submit** — every N iterations (default 5, starting at iteration 10), submits the current best experiment's test predictions via the official `kaggle` CLI (installed as a project dependency; authenticates from the same `~/.kaggle/kaggle.json`). Submission headers and ids come from the competition's `sample_submission.csv`, so files aren't rejected over column names
+7. **Submit** — always writes valid CSVs from `sample_submission.csv`; sends them to Kaggle only when `--submit` explicitly authorizes it, while enforcing `--max-submissions` and skipping duplicate prediction hashes
 8. **Track alignment** — after 5+ submissions, computes the Spearman rank correlation between CV and leaderboard scores; warns below 0.3
 
 ### Step 6: Final hill-climbing ensemble
 
-Once all hypotheses are exhausted, the agent runs **Caruana-style hill climbing** over every persisted experiment: starting from the single best model, it greedily adds (with replacement) whichever library member most improves the blended OOF score, stopping when nothing helps. This routinely beats any single model and beats the old fixed average/blend/stack ladder, because it searches the full experiment history instead of a hand-picked subset — and because it never re-fits or re-scores on data it's judging, it doesn't leak. The blended test prediction is always written to `submission_final.csv` (using the competition's real submission headers), even on short runs that never hit the periodic-submission threshold.
+Once all hypotheses are exhausted, the agent runs **cross-fitted Caruana-style hill climbing** over every persisted experiment. Ensemble members are selected inside meta-folds and scored on held-out rows; final test weights are then learned from all finite OOF rows. The blended test prediction is always written to `submission_final.csv` using the competition's real headers.
 
 ---
 
@@ -143,6 +143,13 @@ uv run main.py --competition "<competition-slug>" --iterations 50
 | `--out` | current dir | Parent directory for `--name` |
 | `--iterations` | 50 | Maximum hypotheses to test (the loop stops early once all are tried) |
 | `--submission-interval` | 5 | How often to submit to the leaderboard (starts at iteration 10) |
+| `--submit` | off | Explicitly authorize Kaggle leaderboard submissions |
+| `--max-submissions` | 3 | Hard submission budget when `--submit` is enabled |
+| `--cv-strategy` | `auto` | `stratified`, `kfold`, `group`, or forward-chaining `time` |
+| `--group-col` | none | Entity column used for GroupKFold and excluded from features |
+| `--time-col` | none | Ordering column used for temporal CV and excluded from features |
+| `--n-splits` | 5 | Number of frozen CV folds |
+| `--seed` | 42 | Fold-generation seed for shuffled CV |
 | `--metric` | `auto` | Optimisation metric. Classification: `roc_auc`, `logloss`, `accuracy`, `f1`. Regression: `rmse`, `mae`, `r2` |
 | `--optuna-trials` | 50 | Hyperparameter trials per tuning session |
 | `--task` | `auto` | Force task type: `classification`, `regression` |
@@ -151,11 +158,8 @@ uv run main.py --competition "<competition-slug>" --iterations 50
 ### Example: quick run to test things work
 
 ```bash
-uv run main.py \
-  --competition "tabular-playground-series-jan-2021" \
-  --iterations 10 \
-  --optuna-trials 10 \
-  --submission-interval 999  # never submit during testing
+uv run main.py --competition "tabular-playground-series-jan-2021" \
+  --iterations 10 --optuna-trials 10
 ```
 
 ---
@@ -275,8 +279,11 @@ kaggle-research/
     │
     ├── state/
     │   ├── log.py            ← JSON logger. Reads/writes state/log.json.
-    │   └── experiments.py    ← Save/load the OOF + test-prediction library used by
+    │   ├── run.py            ← Data/config fingerprints and resume compatibility.
+    │   └── experiments.py    ← Atomic OOF/test predictions plus metadata used by
     │                           hill climbing.
+    ├── tests/                ← Regression tests for CV, state, features, ensembles,
+    │                           routing, and submission safety.
     │
     └── kaggle_wrapper.ipynb  ← Jupyter notebook for the final Kaggle GPU run.
 ```
@@ -286,7 +293,7 @@ kaggle-research/
 ## FAQ
 
 **Can I stop and resume?**
-Yes. The agent reads `state/log.json` and `state/folds.json` at startup and continues from where it left off, on the same frozen folds. Delete both (and `state/experiments/`) for a clean start.
+Yes. Iteration numbering, accepted feature transforms, diagnostics, folds, and experiment artifacts are restored. Data and run settings are fingerprinted; incompatible state is rejected instead of being silently reused. Move or delete the whole `state/` directory for a clean run.
 
 **I don't have a GPU. Will this work?**
 Yes — the hardware detector reduces tree counts and disables GPU-specific settings automatically.

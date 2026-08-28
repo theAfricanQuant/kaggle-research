@@ -1,25 +1,20 @@
 ---
 name: kaggle-research
-description: Runs an autonomous research loop for Kaggle, Zindi, and DrivenData tabular competitions — hypothesise, train with cross-validation, keep or revert based on CV, submit to the leaderboard. Use this skill whenever the user wants to enter, compete in, or iterate on a Kaggle or Zindi competition, mentions a competition slug or URL, asks to "find the best model/ensemble" for tabular data, wants automated hyperparameter tuning or ensembling for a competition, or says things like "compete for me", "run this competition", or "use the kaggle-research skill". Also use it for general tabular ML competition strategy questions (CV design, target encoding, ensembling, submission strategy) even if the user hasn't named a specific competition yet.
-compatibility: Requires Python 3.11+, uv, and a Kaggle API token (~/.kaggle/kaggle.json) for Kaggle competitions. Zindi/DrivenData competitions require manually downloaded data.
+description: Run or improve reproducible binary-classification and regression workflows for Kaggle, Zindi, or DrivenData tabular competitions. Use for competition execution, CV design, tuning, experiment tracking, and OOF ensembling.
 ---
 
 # kaggle-research
 
-Autonomous Kaggle/Zindi competition agent. Designed to run inside AI coding agent harnesses (opencode, Claude Code, pi.dev, Codex).
+Run this skill only in a dedicated project directory. Its research loop is:
+hypothesise → frozen-CV verification → noise-floor gate → persist → ensemble.
 
-The loop: hypothesise → implement → CV verify → keep/revert → submit.
+## Completion criteria
 
-## What you need to do
-
-The user is in an empty project folder. Your job is to:
-
-1. Copy this skill's `template/` files into the current working directory
-2. Install dependencies
-3. Ensure the Kaggle API token is set up (Kaggle competitions only)
-4. Scaffold a named project folder
-5. Run the competition loop
-6. Monitor progress and report back
+- Data, metric, task, and CV strategy are explicit in `state/log.json`.
+- Every attempted hypothesis has comparable OOF predictions and reproducibility metadata.
+- `submission_final.csv` exists when test data exists.
+- Any leaderboard submission was explicitly authorized with `--submit` and stayed within its budget.
+- The final report names the best CV result, ensemble score, validation risks, and artifact paths.
 
 ## Step-by-step execution
 
@@ -45,42 +40,44 @@ uv sync
 mkdir -p ~/.kaggle
 ```
 
-If `~/.kaggle/kaggle.json` doesn't exist, ask the user to download it from kaggle.com/account → Create API Token and place it there. Zindi and DrivenData don't have this requirement — see "Using with Zindi" in README.md.
+If the token is missing, ask the user to create it at kaggle.com/account and place it there with mode `0600`. Check existence and permissions without printing its contents. Zindi and DrivenData use local data instead.
 
-### 4. Scaffold a project folder
+### 4. Configure and run
 
-```bash
-uv run main.py --competition "<slug>" --name <slug> --iterations 50
-cd <slug>
-```
-
-### 5. Run the research loop
+Read the README sections for the chosen platform and CV scheme. A safe local run writes submission files but makes no leaderboard submission:
 
 ```bash
 uv run main.py --competition "<slug>" --iterations 50
 ```
 
-### 6. Monitor
+Grouped and temporal competitions require an explicit split column:
 
-Check `state/log.json` after each submission block. Report to the user:
-- Current best CV score
-- What hypothesis worked best
-- CV vs leaderboard alignment
-- When iterations are done, the final score
+```bash
+uv run main.py --competition "<slug>" --group-col customer_id
+uv run main.py --competition "<slug>" --time-col event_time
+```
 
-## Decision tree
+For Zindi/DrivenData, add `--data-path <folder>` and upload the generated CSV manually.
+Pass `--submit --max-submissions N` only when the user explicitly authorizes Kaggle submissions.
 
-The orchestrator auto-routes, but here's the logic so you understand:
 
-**Phase 1 — Defaults (iterations 1-10)**
-Fast baselines, no tuning.
-1-4: LightGBM defaults → feature engineering (target encoding, interactions)
-5-9: Default XGBoost → default CatBoost
-10: Depth-1 XGBoost + LightGBM ensemble
+### 5. Monitor and report
 
-**Phase 2 — Optuna tuning (iterations 11+, gated by CV)**
+Check `state/log.json` after each experiment. Report:
 
-Routing is relative to the marginal gain of the last few hypotheses, not fixed absolute CV thresholds — a CV of 0.75 is a winning score in some competitions and a broken baseline in others. See `main.py`'s `route_next_hypothesis` for the exact logic.
+- Best CV score and experiment.
+- Accepted feature transforms and ensemble weights.
+- Noise floor, adversarial-validation warning, and CV scheme.
+- Final submission and experiment artifact paths.
+- Leaderboard alignment only when authorized submissions exist.
+
+## Routing
+
+Each registered hypothesis runs at most once on the same frozen folds.
+Feature transformations compound only when their gain exceeds the measured noise floor.
+Optuna tuning follows diverse defaults; every result remains available to the final OOF hill-climbing ensemble.
+When registered work is exhausted, stop rather than repeat identical experiments.
+
 
 ## File layout for reference
 
@@ -97,9 +94,12 @@ Routing is relative to the marginal gain of the last few hypotheses, not fixed a
 | `template/pipeline/download.py` | Kaggle data download |
 | `template/pipeline/submit.py` | Submission + score polling |
 | `template/state/log.py` | Experiment logger |
+| `template/state/run.py` | Run/data fingerprints and resume compatibility |
+| `template/state/experiments.py` | Atomic OOF/test prediction artifacts and metadata |
+| `template/tests/` | Regression tests for CV, state, ensembling, and submissions |
 
 Full methodology (CV design, target encoding, ensembling strategy, submission policy) is documented in `README.md` — read it before making changes to the loop.
 
 ## Extending
 
-To add a new hypothesis: add a function in `worker.py` and map it in `_run_hypothesis`. The router in `main.py` auto-picks the next one based on CV.
+To add a hypothesis, implement its handler in `worker.py`, register it in `KNOWN_HYPOTHESES`, add it to one routing phase in `main.py`, and add a regression test proving its OOF/test-prediction contract.
