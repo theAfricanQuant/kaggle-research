@@ -10,11 +10,25 @@ Supports **binary classification** and **regression** — auto-detected from you
 
 **Step 1 — Install the skill (one-time)**
 
+The repository is compatible with the `npx skills` installer. Install globally for all detected agents:
+
 ```bash
-npx skills add theAfricanQuant/kaggle-research
+npx skills add theAfricanQuant/kaggle-research --global
 ```
 
-This detects your installed agents (Claude Code, Codex, opencode, pi, and 60+ others) and writes the skill into each one's directory. If you're on WSL, pass `--copy` instead of the default symlink — symlinks across the Windows/WSL boundary can be unreliable.
+For a global Codex-only install:
+
+```bash
+npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent codex
+```
+
+Omit `--global` to install into the current project. Use `--agent` to target a specific agent, `--skill kaggle-research` to select this skill explicitly, and `--copy` on WSL or other environments where symlinks are unreliable:
+
+```bash
+npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent codex --copy
+```
+
+The CLI supports GitHub shorthand sources such as `theAfricanQuant/kaggle-research`; it discovers the single `kaggle-research` skill in this repository and writes it into the selected agent directory.
 
 Manual install, if you'd rather not use the installer:
 
