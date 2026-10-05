@@ -1,4 +1,4 @@
-import sys, argparse, logging, hashlib
+import sys, argparse, logging, hashlib, json
 from datetime import datetime
 from pathlib import Path
 
@@ -7,8 +7,8 @@ from hardware import detect_hardware
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("kaggle-research")
 
-METRICS_CLS = ["roc_auc", "logloss", "accuracy", "f1"]
-METRICS_REG = ["rmse", "mae", "r2"]
+METRICS_CLS = ["roc_auc", "average_precision", "logloss", "accuracy", "balanced_accuracy", "f1"]
+METRICS_REG = ["rmse", "rmsle", "mae", "r2"]
 
 # Baselines tried once per run, in order, before Optuna tuning kicks in.
 PHASE1_HYPOTHESES = [
@@ -43,7 +43,7 @@ def main():
     parser.add_argument("--submission-interval", type=int, default=5)
     parser.add_argument("--task", choices=["classification", "regression", "auto"], default="auto")
     parser.add_argument("--cv-strategy", choices=["auto", "stratified", "kfold", "group", "time"],
-                        default="auto", help="Validation splitter; auto uses time/group columns when supplied.")
+                        default=None, help="Override cv_strategy from competition.json; auto uses configured split columns.")
     parser.add_argument("--group-col", default=None,
                         help="Entity/group column excluded from features and kept within one fold.")
     parser.add_argument("--time-col", default=None,
@@ -54,8 +54,8 @@ def main():
                         help="Authorize Kaggle leaderboard submissions. Without this flag only CSVs are written.")
     parser.add_argument("--max-submissions", type=int, default=3,
                         help="Maximum Kaggle submissions this run may make when --submit is present.")
-    parser.add_argument("--metric", default="auto",
-                        help=f"Optimisation metric. Auto: roc_auc (cls) or r2 (reg). "
+    parser.add_argument("--metric", default=None,
+                        help=f"Override metric from competition.json. Without either, defaults to roc_auc (cls) or r2 (reg). "
                              f"Classification: {METRICS_CLS}. Regression: {METRICS_REG}.")
     parser.add_argument("--optuna-trials", type=int, default=50,
                         help="Trials per Optuna study when tuning")
@@ -84,7 +84,7 @@ def main():
 
     from worker import run_hypothesis
     from pipeline.download import fetch_data
-    from pipeline.validate import get_data, detect_task, load_or_create_folds, adversarial_validation_auc, cross_val_score, metric_higher_is_better, resolve_cv_strategy, validate_metric, validate_target
+    from pipeline.validate import get_data, detect_task, load_or_create_folds, adversarial_validation_auc, cross_val_score, metric_higher_is_better, resolve_cv_strategy, validate_metric, validate_target, competition_diagnostics
     from pipeline.submit import kaggle_submit, poll_for_score, save_submission_csv
     from pipeline.ensemble import cross_fitted_hill_climb, apply_weights_to_test
     from state.log import load_state, save_state, LogEntry
@@ -96,27 +96,48 @@ def main():
              f"RAM={hw['ram_gb']}GB Cores={hw['cores']} Kaggle env={hw['on_kaggle']}")
 
     data_path = fetch_data(args.competition, local_path=args.data_path)
+    # Optional checked-in competition brief makes metric/split assumptions
+    # explicit and reproducible across runs. CLI flags take precedence.
+    brief_path = Path(data_path) / "competition.json"
+    if not brief_path.exists() and (HERE / "competition.json").exists():
+        brief_path = HERE / "competition.json"
+    brief = json.loads(brief_path.read_text()) if brief_path.exists() else {}
+    if brief.get("notes"):
+        log.info(f"Competition brief: {brief['notes']}")
+    group_col = args.group_col or brief.get("group_col")
+    time_col = args.time_col or brief.get("time_col")
+    target_col = brief.get("target_col")
     X, y, X_test, test_ids, cat_cols, split_metadata = get_data(
-        data_path, group_col=args.group_col, time_col=args.time_col)
+        data_path, group_col=group_col, time_col=time_col, target_col=target_col)
 
-    task = detect_task(y) if args.task == "auto" else args.task
+    configured_task = brief.get("task", "auto")
+    task_choice = args.task if args.task != "auto" else configured_task
+    task = detect_task(y) if task_choice == "auto" else task_choice
     validate_target(task, y)
-    log.info(f"Task: {task}" + (" (auto-detected)" if args.task == "auto" else ""))
+    log.info(f"Task: {task}" + (" (auto-detected)" if task_choice == "auto" else ""))
 
-    metric = validate_metric(task, args.metric if args.metric != "auto" else ("roc_auc" if task == "classification" else "r2"))
+    metric_choice = args.metric or brief.get("metric", "auto")
+    metric = validate_metric(task, metric_choice if metric_choice != "auto" else ("roc_auc" if task == "classification" else "r2"))
     log.info(f"Optimising for: {metric}")
 
-    cv_strategy = resolve_cv_strategy(task, args.cv_strategy,
+    cv_strategy = resolve_cv_strategy(task, args.cv_strategy or brief.get("cv_strategy", "auto"),
                                       split_metadata["groups"], split_metadata["times"])
+    for note in competition_diagnostics(X, y):
+        log.warning(f"Competition review: {note}")
+    if cv_strategy in ("stratified", "kfold"):
+        log.warning("CV review: using row-wise CV. Confirm the competition does not require group, time, spatial, or predefined folds.")
+    if metric_choice == "auto":
+        log.warning(f"Metric review: defaulting to {metric}; confirm this matches the competition's exact evaluation metric.")
     data_fingerprint = fingerprint_data(data_path)
     run_config = {
         "competition": args.competition,
         "data_fingerprint": data_fingerprint,
         "task": task,
         "metric": metric,
+        "target_col": target_col,
         "cv_strategy": cv_strategy,
-        "group_col": args.group_col,
-        "time_col": args.time_col,
+        "group_col": group_col,
+        "time_col": time_col,
         "n_splits": args.n_splits,
         "seed": args.seed,
         "optuna_trials": args.optuna_trials,
@@ -321,7 +342,7 @@ def _estimate_noise_floor(X, y, X_test, hw, task, metric, folds, cat_cols, n_see
         else:
             splitter = get_splitter(task, strategy=cv_strategy, n_splits=len(folds), random_state=seed)
             seeded_folds = [(tr, va) for tr, va in splitter.split(X, y)]
-        oof, _, _ = train_lgbm(X, y, None, hw, task, seeded_folds, cat_cols)
+        oof, _, _ = train_lgbm(X, y, None, hw, task, seeded_folds, cat_cols, metric=metric)
         scores.append(cross_val_score(y, oof, task, metric))
     import numpy as np
     return float(np.std(scores)) or 1e-4

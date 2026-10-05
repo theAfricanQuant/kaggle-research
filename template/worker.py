@@ -49,7 +49,7 @@ def _baseline(hyp, ctx):
     from pipeline.validate import cross_val_score
 
     X, X_test = ctx["feature_state"]["X"], ctx["feature_state"]["X_test"]
-    oof, test_preds, _ = train_lgbm(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
+    oof, test_preds, _ = train_lgbm(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": "lgbm_defaults", "cv_score": cv, "oof": oof, "test_preds": test_preds}
 
@@ -59,7 +59,7 @@ def _xgb_baseline(hyp, ctx):
     from pipeline.validate import cross_val_score
 
     X, X_test = ctx["feature_state"]["X"], ctx["feature_state"]["X_test"]
-    oof, test_preds, _ = train_xgb(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
+    oof, test_preds, _ = train_xgb(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": "xgb_defaults", "cv_score": cv, "oof": oof, "test_preds": test_preds}
 
@@ -69,7 +69,7 @@ def _catboost_baseline(hyp, ctx):
     from pipeline.validate import cross_val_score
 
     X, X_test = ctx["feature_state"]["X"], ctx["feature_state"]["X_test"]
-    oof, test_preds, _ = train_catboost(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
+    oof, test_preds, _ = train_catboost(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": "catboost_defaults", "cv_score": cv, "oof": oof, "test_preds": test_preds}
 
@@ -89,7 +89,7 @@ def _with_feature_engineering(hyp, ctx):
     base_X, base_X_test = ctx["feature_state"]["X"], ctx["feature_state"]["X_test"]
     X_fe, X_test_fe = engineer_features(base_X, ctx["y"], base_X_test, ctx["cat_cols"], [transform], ctx["folds"])
 
-    oof, test_preds, _ = train_lgbm(X_fe, ctx["y"], X_test_fe, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
+    oof, test_preds, _ = train_lgbm(X_fe, ctx["y"], X_test_fe, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": hyp, "cv_score": cv, "oof": oof, "test_preds": test_preds,
             "candidate_features": (X_fe, X_test_fe), "transform": transform}
@@ -110,7 +110,7 @@ def _tuned_model(hyp, ctx):
     log.info(f"  Best {model_type} params: {best_params} (mean_best_iteration={best_iter})")
 
     oof, test_preds, _ = train_tuned(model_type, X, ctx["y"], X_test, ctx["hw"], ctx["task"],
-                                      ctx["folds"], ctx["cat_cols"], best_params, best_iter)
+                                      ctx["folds"], ctx["cat_cols"], best_params, best_iter, metric=ctx["metric"])
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])
     return {"hypothesis": hyp, "cv_score": cv, "oof": oof, "test_preds": test_preds,
             "best_params": best_params, "best_iteration": best_iter}
@@ -121,8 +121,8 @@ def _depth1_ensemble(hyp, ctx):
     from pipeline.validate import cross_val_score
 
     X, X_test = ctx["feature_state"]["X"], ctx["feature_state"]["X_test"]
-    oof_d1, test_d1, _ = train_depth1_xgb(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
-    oof_l, test_l, _ = train_lgbm(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"])
+    oof_d1, test_d1, _ = train_depth1_xgb(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
+    oof_l, test_l, _ = train_lgbm(X, ctx["y"], X_test, ctx["hw"], ctx["task"], ctx["folds"], ctx["cat_cols"], metric=ctx["metric"])
     oof = np.column_stack([oof_d1, oof_l]).mean(axis=1)
     test_preds = np.column_stack([test_d1, test_l]).mean(axis=1) if X_test is not None else None
     cv = cross_val_score(ctx["y"], oof, ctx["task"], ctx["metric"])

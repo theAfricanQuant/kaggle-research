@@ -1,6 +1,7 @@
 import optuna
 import numpy as np
 from pipeline.validate import cross_val_score, metric_higher_is_better
+from pipeline.train import _eval_metric
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -26,6 +27,7 @@ def _xgb_objective(trial, X, y, task, hw, metric, folds, cat_cols):
         "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3, log=True),
     }
     params["objective"] = "binary:logistic" if is_cls else "reg:squarederror"
+    params["eval_metric"] = _eval_metric("xgb", task, metric)
 
     scores, best_iters = [], []
     for tr, va in folds:
@@ -53,6 +55,7 @@ def _lgbm_objective(trial, X, y, task, hw, metric, folds, cat_cols):
         "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3, log=True),
     }
     params["objective"] = "binary" if is_cls else "regression"
+    params["metric"] = _eval_metric("lgbm", task, metric)
 
     scores, best_iters = [], []
     for tr, va in folds:
@@ -84,6 +87,7 @@ def _cat_objective(trial, X, y, task, hw, metric, folds, cat_cols):
         "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 0, 10),
         "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.3, log=True),
     }
+    params["eval_metric"] = _eval_metric("catboost", task, metric)
     if not hw["gpu"]:
         # rsm/colsample_bylevel is CPU-only in CatBoost for most losses
         params["colsample_bylevel"] = trial.suggest_float("colsample_bylevel", 0.5, 1.0)

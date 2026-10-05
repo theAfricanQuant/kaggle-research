@@ -3,7 +3,9 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold, KFold, GroupKFold, TimeSeriesSplit
-from sklearn.metrics import roc_auc_score, r2_score, log_loss, mean_squared_error, mean_absolute_error, accuracy_score, f1_score
+from sklearn.metrics import (roc_auc_score, average_precision_score, balanced_accuracy_score,
+                             r2_score, log_loss, mean_squared_error, mean_absolute_error,
+                             accuracy_score, f1_score)
 
 
 def detect_task(y):
@@ -37,7 +39,7 @@ def _load_csv(data_path, name):
     return pd.read_csv(path) if os.path.exists(path) else None
 
 
-def get_data(data_path, sample_frac=1.0, group_col=None, time_col=None):
+def get_data(data_path, sample_frac=1.0, group_col=None, time_col=None, target_col=None):
     """Loads train (and test, if present) preserving categorical columns.
 
     Returns (X_train, y, X_test, test_ids, categorical_columns, split_metadata).
@@ -54,14 +56,17 @@ def get_data(data_path, sample_frac=1.0, group_col=None, time_col=None):
     # over guessing, since competitions use anything from "Id" to "SalePrice".
     sample = _load_csv(data_path, "sample_submission.csv")
     id_col = next((c for c in df.columns if c.lower() == "id"), None)
-    target_col = None
+    inferred_target = None
     if sample is not None and len(sample.columns) >= 2:
         if sample.columns[0] in df.columns:
             id_col = sample.columns[0]
         if sample.columns[1] in df.columns:
-            target_col = sample.columns[1]
+            inferred_target = sample.columns[1]
+    target_col = target_col or inferred_target
     if target_col is None:
         target_col = "target" if "target" in df.columns else [c for c in df.columns if c != id_col][-1]
+    if target_col not in df.columns:
+        raise KeyError(f"Configured target column '{target_col}' is missing from train.csv")
 
     for split_col, label in ((group_col, "group"), (time_col, "time")):
         if split_col and split_col not in df.columns:
@@ -89,10 +94,8 @@ def get_data(data_path, sample_frac=1.0, group_col=None, time_col=None):
                 known_categories = X[col].cat.categories
                 X_test[col] = X_test[col].where(X_test[col].isin(known_categories)).astype(pd.CategoricalDtype(categories=known_categories))
             cat_cols.append(col)
-        else:
-            X[col] = X[col].fillna(X[col].median())
-            if X_test is not None:
-                X_test[col] = X_test[col].fillna(X[col].median())
+        # The tree models used here handle numeric NaNs natively. Avoid
+        # full-data imputation, which would let validation rows affect medians.
 
     return X, y, X_test, test_ids, cat_cols, {"groups": groups, "times": times}
 
@@ -200,8 +203,8 @@ def adversarial_validation_auc(X_train, X_test, n_splits=5):
 
 
 def validate_metric(task, metric):
-    allowed = {"classification": {"roc_auc", "logloss", "accuracy", "f1"},
-               "regression": {"rmse", "mae", "r2"}}
+    allowed = {"classification": {"roc_auc", "average_precision", "logloss", "accuracy", "balanced_accuracy", "f1"},
+               "regression": {"rmse", "rmsle", "mae", "r2"}}
     if task not in allowed:
         raise ValueError(f"Unknown task '{task}'")
     if metric not in allowed[task]:
@@ -218,20 +221,57 @@ def cross_val_score(y_true, y_pred, task, metric=None):
     y_true, y_pred = y_true[valid], y_pred[valid]
     if metric == "roc_auc":
         return roc_auc_score(y_true, y_pred)
+    if metric == "average_precision":
+        return average_precision_score(y_true, y_pred)
     if metric == "logloss":
         return log_loss(y_true, y_pred)
     if metric == "rmse":
         return mean_squared_error(y_true, y_pred) ** 0.5
+    if metric == "rmsle":
+        if np.any(y_true < 0):
+            raise ValueError("RMSLE requires non-negative target values")
+        return mean_squared_error(np.log1p(y_true), np.log1p(np.maximum(y_pred, 0))) ** 0.5
     if metric == "mae":
         return mean_absolute_error(y_true, y_pred)
     if metric == "r2":
         return r2_score(y_true, y_pred)
     if metric == "accuracy":
         return accuracy_score(y_true, (y_pred > 0.5).astype(int))
+    if metric == "balanced_accuracy":
+        return balanced_accuracy_score(y_true, (y_pred > 0.5).astype(int))
     if metric == "f1":
         return f1_score(y_true, (y_pred > 0.5).astype(int))
     raise AssertionError(f"Unhandled metric: {metric}")
 
 
 def metric_higher_is_better(metric):
-    return metric in ("roc_auc", "r2", "accuracy", "f1")
+    return metric in ("roc_auc", "average_precision", "r2", "accuracy", "balanced_accuracy", "f1")
+
+
+def competition_diagnostics(X, y):
+    """Return inspectable clues to guide metric, feature, and CV decisions."""
+    notes = []
+    date_names = [c for c in X if any(k in c.lower() for k in ("date", "time", "timestamp"))]
+    if date_names:
+        notes.append(f"Date/time-like columns need parsing and temporal-CV review: {date_names}")
+    id_names = [c for c in X if c.lower() in {"id", "row_id", "sample_id", "customer_id", "user_id"}]
+    if id_names:
+        notes.append(f"Possible identifiers/group columns need review: {id_names}")
+    numeric = X.select_dtypes(include=[np.number]).columns
+    if len(numeric):
+        missing = X[numeric].isna().mean().sort_values(ascending=False)
+        high_missing = missing[missing >= 0.25]
+        if len(high_missing):
+            notes.append("Numeric columns with >=25% missing: " + ", ".join(
+                f"{c} ({v:.0%})" for c, v in high_missing.items()))
+    categorical = X.select_dtypes(exclude=[np.number]).columns
+    high_card = [c for c in categorical if X[c].nunique(dropna=True) > max(50, len(X) * 0.1)]
+    if high_card:
+        notes.append(f"High-cardinality categoricals may benefit from leakage-safe encoding: {high_card}")
+    if len(np.unique(y)) == 2:
+        rate = float(np.mean(y))
+        if min(rate, 1-rate) < 0.1:
+            notes.append(f"Imbalanced target (minority share {min(rate, 1-rate):.1%}); verify metric and stratification.")
+    if not notes:
+        notes.append("No obvious structural clue found. Confirm the competition metric and split rules from its overview/data description.")
+    return notes

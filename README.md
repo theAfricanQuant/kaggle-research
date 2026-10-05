@@ -164,7 +164,7 @@ uv run main.py --competition "<competition-slug>" --iterations 50
 | `--time-col` | none | Ordering column used for temporal CV and excluded from features |
 | `--n-splits` | 5 | Number of frozen CV folds |
 | `--seed` | 42 | Fold-generation seed for shuffled CV |
-| `--metric` | `auto` | Optimisation metric. Classification: `roc_auc`, `logloss`, `accuracy`, `f1`. Regression: `rmse`, `mae`, `r2` |
+| `--metric` | `auto` | Override the competition brief. Classification: `roc_auc`, `average_precision`, `logloss`, `accuracy`, `balanced_accuracy`, `f1`. Regression: `rmse`, `rmsle`, `mae`, `r2` |
 | `--optuna-trials` | 50 | Hyperparameter trials per tuning session |
 | `--task` | `auto` | Force task type: `classification`, `regression` |
 | `--noise-seeds` | 3 | Seeds used to estimate the CV noise floor before the loop starts |
@@ -175,6 +175,25 @@ uv run main.py --competition "<competition-slug>" --iterations 50
 uv run main.py --competition "tabular-playground-series-jan-2021" \
   --iterations 10 --optuna-trials 10
 ```
+
+### Competition brief (recommended)
+
+Put a `competition.json` beside the competition CSVs (or in the project root) to make the target, supported metric, and validation assumptions explicit and reproducible:
+
+```json
+{
+  "target_col": "target",
+  "task": "classification",
+  "metric": "average_precision",
+  "cv_strategy": "group",
+  "group_col": "customer_id",
+  "notes": "One row per transaction; customers must not cross folds."
+}
+```
+
+Supported task values are `classification` and `regression`; supported metrics are listed in the CLI table. CLI `--metric`, `--cv-strategy`, `--group-col`, and `--time-col` override the brief. The run prints structural clues and warns when row-wise CV or a default metric is being used. These checks guide review; they cannot infer the competition's rules reliably from CSVs alone. Confirm the metric, split scheme, and any group/time columns against the competition page before trusting CV.
+
+Numeric missing values are left intact because the tree models handle them natively; this avoids estimating imputation medians from validation rows before folds are applied. The loop scores OOF predictions with the selected metric and uses each model library's matching early-stopping metric where available. For threshold metrics such as F1, early stopping uses a probability/ranking loss proxy; the final CV score remains the requested metric.
 
 ---
 

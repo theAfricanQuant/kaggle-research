@@ -1,11 +1,33 @@
 import numpy as np
 
 
+def _eval_metric(model_name, task, metric):
+    """Choose the closest native early-stopping metric to the scored metric."""
+    if task == "classification":
+        maps = {
+            "xgb": {"roc_auc": "auc", "average_precision": "aucpr", "logloss": "logloss",
+                    "accuracy": "error", "balanced_accuracy": "error", "f1": "aucpr"},
+            "lgbm": {"roc_auc": "auc", "average_precision": "average_precision", "logloss": "binary_logloss",
+                     "accuracy": "binary_error", "balanced_accuracy": "binary_logloss", "f1": "average_precision"},
+            # CatBoost marks threshold metrics (Accuracy/BalancedAccuracy/F1)
+            # as non-optimizable; use Logloss for early stopping in those cases.
+            "catboost": {"roc_auc": "AUC", "average_precision": "PRAUC", "logloss": "Logloss",
+                         "accuracy": "Logloss", "balanced_accuracy": "Logloss", "f1": "Logloss"},
+        }
+    else:
+        maps = {
+            "xgb": {"rmse": "rmse", "rmsle": "rmsle", "mae": "mae", "r2": "rmse"},
+            "lgbm": {"rmse": "rmse", "rmsle": "rmsle", "mae": "l1", "r2": "l2"},
+            "catboost": {"rmse": "RMSE", "rmsle": "RMSLE", "mae": "MAE", "r2": "R2"},
+        }
+    return maps[model_name][metric]
+
+
 def _predict(model, X, is_cls):
     return model.predict_proba(X)[:, 1] if is_cls else model.predict(X)
 
 
-def train_lgbm(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None):
+def train_lgbm(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None, metric=None):
     import lightgbm as lgb
     is_cls = task == "classification"
     model_cls = lgb.LGBMClassifier if is_cls else lgb.LGBMRegressor
@@ -13,6 +35,8 @@ def train_lgbm(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_esti
         n_estimators=n_estimators or (500 if hw["gpu"] else 200),
         learning_rate=0.05, num_leaves=31, random_state=42, verbose=-1,
     )
+    if metric:
+        base_params["metric"] = _eval_metric("lgbm", task, metric)
     base_params.update(params or {})
 
     oof = np.full(len(X), np.nan)
@@ -30,7 +54,7 @@ def train_lgbm(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_esti
     return oof, test_preds, {"mean_best_iteration": int(np.mean(best_iters))}
 
 
-def train_xgb(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None):
+def train_xgb(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None, metric=None):
     import xgboost as xgb
     is_cls = task == "classification"
     model_cls = xgb.XGBClassifier if is_cls else xgb.XGBRegressor
@@ -39,6 +63,8 @@ def train_xgb(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estim
         learning_rate=0.05, max_depth=6, random_state=42, verbosity=0,
         early_stopping_rounds=50, enable_categorical=bool(cat_cols),
     )
+    if metric:
+        base_params["eval_metric"] = _eval_metric("xgb", task, metric)
     base_params.update(params or {})
     if "n_estimators" not in (params or {}) and n_estimators:
         base_params["n_estimators"] = n_estimators
@@ -56,11 +82,11 @@ def train_xgb(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estim
     return oof, test_preds, {"mean_best_iteration": int(np.mean(best_iters))}
 
 
-def train_depth1_xgb(X, y, X_test, hw, task, folds, cat_cols=None):
-    return train_xgb(X, y, X_test, hw, task, folds, cat_cols=cat_cols, params={"max_depth": 1})
+def train_depth1_xgb(X, y, X_test, hw, task, folds, cat_cols=None, metric=None):
+    return train_xgb(X, y, X_test, hw, task, folds, cat_cols=cat_cols, params={"max_depth": 1}, metric=metric)
 
 
-def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None):
+def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_estimators=None, metric=None):
     from catboost import CatBoostClassifier, CatBoostRegressor, Pool
     is_cls = task == "classification"
     model_cls = CatBoostClassifier if is_cls else CatBoostRegressor
@@ -70,6 +96,8 @@ def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_
         task_type="GPU" if hw["gpu"] else "CPU",
         early_stopping_rounds=50,
     )
+    if metric:
+        base_params["eval_metric"] = _eval_metric("catboost", task, metric)
     base_params.update(params or {})
     # Optuna's best_params only carries *suggested* keys, so the tuned refit
     # must re-add the static bootstrap_type that makes 'subsample' legal on GPU
@@ -94,6 +122,7 @@ def train_catboost(X, y, X_test, hw, task, folds, cat_cols=None, params=None, n_
     return oof, test_preds, {"mean_best_iteration": int(np.mean(best_iters))}
 
 
-def train_tuned(model_type, X, y, X_test, hw, task, folds, cat_cols, params, n_estimators):
+def train_tuned(model_type, X, y, X_test, hw, task, folds, cat_cols, params, n_estimators, metric=None):
     trainer = {"xgb": train_xgb, "lgbm": train_lgbm, "catboost": train_catboost}[model_type]
-    return trainer(X, y, X_test, hw, task, folds, cat_cols=cat_cols, params=params, n_estimators=n_estimators)
+    return trainer(X, y, X_test, hw, task, folds, cat_cols=cat_cols, params=params,
+                   n_estimators=n_estimators, metric=metric)
