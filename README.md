@@ -6,60 +6,63 @@ Supports **binary classification** and **regression** — auto-detected from you
 
 ## Quick start
 
-### For AI agents (opencode, Claude Code, Codex, pi.dev)
+This project runs as a Python command-line program. An AI harness can set it up and operate it for you, but it needs access to a terminal, a writable project folder, Python dependencies, and Kaggle credentials. The repository does not host a web app.
 
-**Step 1 — Install the skill (one-time)**
+### 1. Install the skill in a coding-agent harness
 
-The repository is compatible with the `npx skills` installer. Install globally for all detected agents:
+You need Node.js/npm for `npx skills`, Python 3.11 or later, and [`uv`](https://docs.astral.sh/uv/getting-started/installation/). Install the skill globally for detected supported agents:
 
 ```bash
-npx skills add theAfricanQuant/kaggle-research --global
+npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global
 ```
 
-For a global Codex-only install:
+Or target one harness explicitly:
 
 ```bash
 npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent codex
+npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent claude-code
+npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent opencode
 ```
 
-Omit `--global` to install into the current project. Use `--agent` to target a specific agent, `--skill kaggle-research` to select this skill explicitly, and `--copy` on WSL or other environments where symlinks are unreliable:
+Omit `--global` to install the skill into the current project so collaborators can share it. Add `--copy` if your environment does not support symlinks. The installer supports these and many other coding agents; see [`npx skills`](https://github.com/vercel-labs/skills) for its current agent list. This installs the workflow instructions, not Python, `uv`, or Kaggle credentials.
 
-```bash
-npx skills add theAfricanQuant/kaggle-research --skill kaggle-research --global --agent codex --copy
-```
+Open your competition project folder in the harness and ask:
 
-The CLI supports GitHub shorthand sources such as `theAfricanQuant/kaggle-research`; it discovers the single `kaggle-research` skill in this repository and writes it into the selected agent directory.
+> Use the `kaggle-research` skill to set up and run the Kaggle competition at `https://www.kaggle.com/competitions/titanic/overview`. Check the competition's Evaluation page and data rules, save the verified metric and validation setup in `competition.json`, run 10 iterations with 10 Optuna trials, and write a submission CSV. Do not submit it to the leaderboard.
 
-Manual install, if you'd rather not use the installer:
+The competition URL contains the slug (`titanic` in this example). The command accepts the slug, not the full URL. The agent should create a separate competition project, explain any metric or split uncertainty, install dependencies, and run the pipeline. Review the generated `competition.json` and the startup warnings before trusting the CV score.
 
-```bash
-git clone https://github.com/theAfricanQuant/kaggle-research.git
-cp -r kaggle-research ~/.agents/skills/kaggle-research   # Codex, opencode, pi, Gemini CLI
-cp -r kaggle-research ~/.claude/skills/kaggle-research    # Claude Code (reads its own directory only)
-```
+### 2. Use it from ChatGPT
 
-**Step 2 — Use it**
+If your ChatGPT workspace has Skills enabled, download the repository and upload a skill package containing the root `SKILL.md` and the `template/` folder from **Skills → Create → Upload from your computer**. Skills are currently available only to eligible ChatGPT Business, Enterprise, Healthcare, and Edu workspaces, subject to admin settings; see [OpenAI's Skills in ChatGPT guide](https://help.openai.com/en/articles/20001066-skills-in-chatgpt).
 
-```bash
-mkdir my-competition && cd my-competition
-```
+A ChatGPT skill provides the workflow instructions. To actually download competition data, install Python packages, and run the pipeline, ChatGPT also needs a connected coding workspace or agent with terminal and filesystem access plus Kaggle credentials. In a regular chat without those tools, ask ChatGPT to help prepare the `competition.json` and commands, then run them in a terminal yourself. Never paste your Kaggle token into a prompt.
 
-Then tell your agent:
+### 3. Connect your Kaggle account
 
-> "Use the kaggle-research skill on competition house-prices-advanced-regression-techniques"
+Accept the competition rules on Kaggle first. Authenticate with one of Kaggle's supported methods: `kaggle auth login`, the `KAGGLE_API_TOKEN` environment variable, `~/.kaggle/access_token`, or the legacy `~/.kaggle/kaggle.json` credentials file. The terminal quick start below installs the `kaggle` CLI into the project; then run `uv run kaggle auth login` to sign in. See [Kaggle's CLI authentication guide](https://github.com/Kaggle/kaggle-cli/blob/main/docs/README.md) and [kagglehub authentication](https://github.com/Kaggle/kagglehub#authenticate). Keep credentials out of the repository and prompts.
 
-The agent reads `SKILL.md`, copies the `template/` files into your folder, installs deps, scaffolds a project, and runs the full research loop — all autonomously. Just ensure `~/.kaggle/kaggle.json` exists (Kaggle competitions only).
+For Zindi or DrivenData, download `train.csv`, `test.csv`, and `sample_submission.csv` yourself; no Kaggle sign-in is needed. The data folder is passed with `--data-path /path/to/competition-data`; see [Using with Zindi](#using-with-zindiafrica).
 
-### Manual (without an agent)
+### 4. Run it yourself in a terminal
+
+Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.11+, then create a clean competition project from the template:
 
 ```bash
 git clone https://github.com/theAfricanQuant/kaggle-research.git
 cd kaggle-research/template
+uv run main.py --name titanic --out .. --competition titanic
+cd ../titanic
 uv sync
-uv run main.py --name house-prices
-cd house-prices
-uv run main.py --competition "house-prices-advanced-regression-techniques" --iterations 50
+uv run kaggle auth login
+uv run main.py --competition titanic --iterations 10 --optuna-trials 10
 ```
+
+The first command creates `kaggle-research/titanic/` without changing the reusable template. The run downloads Kaggle competition files, runs a short research pass, and writes `submission.csv` and usually `submission_final.csv`. It does **not** send a leaderboard submission. For local data instead, replace the competition slug with a label and add `--data-path /path/to/competition-data`.
+
+### 5. Make a leaderboard submission only when ready
+
+The safe default only creates CSV files. To authorize actual Kaggle submissions, pass `--submit` and choose a small budget, for example `--submit --max-submissions 1`. Kaggle submissions consume your competition submission allowance.
 
 ---
 
@@ -71,11 +74,11 @@ For Kaggle competitions, `kagglehub` downloads the train/test CSVs and caches th
 
 ### Step 2: Detect your hardware
 
-Checks GPU (`torch.cuda.is_available()`), RAM, and CPU cores. Determines tree counts and whether to enable GPU training (`task_type="GPU"` in CatBoost).
+Checks for an NVIDIA GPU with `nvidia-smi`, RAM, and CPU cores. Chooses conservative tree counts and enables CatBoost GPU training when a supported GPU is detected. PyTorch is not required.
 
 ### Step 3: Detect the task type and freeze the CV folds
 
-Reads the target column: integer/low-cardinality → **classification** (StratifiedKFold, ROC-AUC, predict_proba); float/high-cardinality → **regression** (KFold, R², direct predict). Override with `--task`.
+Reads the target column and infers binary classification or regression; override with `--task` or `competition.json`. The optimization metric comes from `--metric`, then `competition.json`, then falls back to ROC-AUC (classification) or R² (regression). Always set and verify it against Kaggle's Evaluation page.
 
 The 5-fold split is generated **once** and written to `state/folds.json`. Every hypothesis for the rest of the run reuses those exact folds — this is what makes OOF predictions from different experiments comparable and stackable later. Changing folds mid-run would silently invalidate every ensembling step.
 
@@ -135,7 +138,7 @@ When every hypothesis has been tried, the loop ends early and moves to the final
 
 - **Python 3.11+** (3.12 recommended)
 - **uv** — `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **Kaggle account** and **API token** (Kaggle competitions only) — kaggle.com/account → Create API Token → `~/.kaggle/kaggle.json`
+- **Kaggle account** and credentials (Kaggle competitions only) — authenticate with `uv run kaggle auth login`, or configure a Kaggle API token / legacy credentials file as described above.
 
 Works on Linux, macOS, Windows (WSL2), CPU-only or NVIDIA GPU.
 
@@ -335,7 +338,7 @@ Yes — the hardware detector reduces tree counts and disables GPU-specific sett
 Yes — pass `--data-path` pointing at any folder with `train.csv`/`test.csv` and skip the submission step.
 
 **What if my competition uses a metric not listed?**
-Add it to `pipeline/validate.py`'s `cross_val_score` and it'll work everywhere the metric is threaded through (tuning, gating, hill climbing).
+Add it to `pipeline/validate.py`'s `cross_val_score`, `metric_higher_is_better`, and the model-specific early-stopping mapping in `pipeline/train.py`. Then check that tuning, noise-floor gating, ensembling, submission selection, and reporting all handle its direction and prediction format correctly. Custom or unsupported Kaggle metrics must not be silently replaced with a default.
 
 **Does it work with Zindi?**
 Yes — see [Using with Zindi.africa](#using-with-zindiafrica).
@@ -344,7 +347,7 @@ Yes — see [Using with Zindi.africa](#using-with-zindiafrica).
 Add a function in `worker.py`, register it in both the `handlers` dict and `KNOWN_HYPOTHESES`, and add its name to `PHASE1_HYPOTHESES`/`PHASE2_HYPOTHESES` in `main.py`. A startup check validates the routing lists against the worker's registry, so a typo fails loudly at launch instead of silently skipping iterations.
 
 **My competition has repeated entities (users, molecules, patients) or is time-ordered — will the default folds leak?**
-The auto-picked splitter (`get_splitter` in `pipeline/validate.py`) only distinguishes classification from regression — it can't detect grouping or time order from the CSV alone. If your data has either property, modify `get_splitter` to use `GroupKFold` or `TimeSeriesSplit` before your first run; folds are frozen on first use, so this must happen before `state/folds.json` exists.
+The CSV alone may not reveal the correct split. Verify the competition rules and data collection process, then set `group_col` or `time_col` in `competition.json` (or use `--group-col` / `--time-col`) before the first run. Folds are frozen on first use; if the split strategy changes, start a fresh run by moving or deleting its `state/` directory.
 
 ---
 
